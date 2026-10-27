@@ -73,9 +73,12 @@ from .response import BaseKustoResponseDataSet, KustoResponseDataSet, KustoStrea
 
 try:
     import pyarrow as pa
-    import pyarrow.compute as pc
+    import pyarrow.compute as _pc
 except ImportError as e:
     raise KustoArrowNotInstalledError() from e
+
+# The compute functions are generated when pyarrow is imported, so type checkers don't know them
+pc: Any = _pc
 
 __all__ = [
     "DEFAULT_BATCH_SIZE",
@@ -449,7 +452,7 @@ class _ArrowConverter:
 
     # ---- builders for the default conversions
 
-    def _map(self, name: str, values: Sequence[Any], convert: Callable[[Any], Any], target: str) -> list:
+    def _map(self, name: str, values: Sequence[Any], convert: Callable[[Any], Any], target: str) -> List[Any]:
         """Converts the values one by one, applying the error policy. Nulls stay nulls."""
         result = []
         for value in values:
@@ -621,7 +624,7 @@ def _check_batch_size(batch_size: int) -> None:
         raise ValueError("batch_size must be positive, got {}".format(batch_size))
 
 
-def _raw_rows(table: Union[KustoResultTable, KustoStreamingResultTable]) -> Iterable[list]:
+def _raw_rows(table: Union[KustoResultTable, KustoStreamingResultTable]) -> Iterable[List[Any]]:
     # Streaming tables are read through a wrapper which keeps their state (row count, finished) up to date
     if isinstance(table, KustoStreamingResultTable):
         return table._iter_raw_rows()

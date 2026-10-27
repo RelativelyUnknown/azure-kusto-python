@@ -212,7 +212,7 @@ class KustoStreamingResultTable(BaseStreamingKustoResultTable):
     def __iter__(self) -> Iterator[KustoResultRow]:
         return self
 
-    def _iter_raw_rows(self) -> Iterator[list]:
+    def _iter_raw_rows(self) -> Iterator[List[Any]]:
         """
         Iterates over the raw (unconverted) rows, while keeping `row_count` and `finished` up to date,
         so that the response data set can advance to the next table once this one is exhausted.

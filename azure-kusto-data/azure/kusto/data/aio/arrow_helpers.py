@@ -163,7 +163,7 @@ async def arrow_tables_from_streaming_response(
 
     tables = []
     async for table in response.iter_primary_results() if primary_only else response:
-        if table is None:  # The response marks its end with a None
+        if not isinstance(table, (KustoResultTable, KustoStreamingResultTable)):  # The response marks its end with a None
             continue
         tables.append(
             await arrow_table_from_streaming_result_table(
