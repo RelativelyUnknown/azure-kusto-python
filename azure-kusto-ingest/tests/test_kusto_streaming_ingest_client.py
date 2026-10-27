@@ -150,6 +150,29 @@ class TestKustoStreamingIngestClient:
         assert result.status == IngestionStatus.SUCCESS
 
     @responses.activate
+    def test_streaming_ingest_from_arrow(self, ingest_client_class):
+        pa = pytest.importorskip("pyarrow")
+        pq = pytest.importorskip("pyarrow.parquet")
+
+        bodies = []
+
+        def callback(request):
+            bodies.append(request.body)
+            assert request.url.endswith("/v1/rest/ingest/database/table?streamFormat=parquet")
+            return request_callback(request, ingest_client_class)
+
+        responses.add_callback(responses.POST, "https://somecluster.kusto.windows.net/v1/rest/ingest/database/table", callback=callback)
+
+        ingest_client = ingest_client_class("https://somecluster.kusto.windows.net")
+        ingestion_properties = IngestionProperties(database="database", table="table", data_format=DataFormat.CSV)
+
+        table = pa.table({"id": pa.array([1, 2], pa.int64()), "name": pa.array(["abc", "cde"]), "value": pa.array([15.3, 99.9])})
+
+        result = ingest_client.ingest_from_arrow(table, ingestion_properties)
+        assert result.status == IngestionStatus.SUCCESS
+        assert pq.read_table(io.BytesIO(bodies[0])).equals(table)
+
+    @responses.activate
     def test_streaming_ingest_from_stream(self, ingest_client_class):
         responses.add_callback(
             responses.POST, "https://somecluster.kusto.windows.net/v1/rest/ingest/database/table", callback=lambda r: request_callback(r, ingest_client_class)

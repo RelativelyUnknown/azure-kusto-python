@@ -517,6 +517,40 @@ class TestQueuedIngestClient:
 
     @responses.activate
     @patch("azure.kusto.ingest.managed_streaming_ingest_client.ManagedStreamingIngestClient.MAX_STREAMING_SIZE_IN_BYTES", new=0)
+    @patch("azure.storage.blob.BlobClient.upload_blob")
+    @patch("azure.storage.queue.QueueClient.send_message")
+    @patch("uuid.uuid4", return_value=MOCKED_UUID_4)
+    @patch("time.time", return_value=MOCKED_TIME)
+    @patch("os.getpid", return_value=MOCKED_PID)
+    def test_simple_ingest_from_arrow(self, mock_pid, mock_time, mock_uuid, mock_put_message_in_queue, mock_upload_blob_from_stream, ingest_client_class):
+        pa = pytest.importorskip("pyarrow")
+        pq = pytest.importorskip("pyarrow.parquet")
+
+        responses.add_callback(
+            responses.POST, "https://ingest-somecluster.kusto.windows.net/v1/rest/mgmt", callback=request_callback, content_type="application/json"
+        )
+        uploaded = []
+        mock_upload_blob_from_stream.side_effect = lambda **kwargs: uploaded.append(kwargs["data"].read())
+
+        ingest_client = ingest_client_class("https://ingest-somecluster.kusto.windows.net")
+        ingestion_properties = IngestionProperties(database="database", table="table")
+
+        table = pa.table({"id": pa.array([1, 2], pa.int64()), "name": pa.array(["abc", "cde"]), "value": pa.array([15.3, 99.9])})
+
+        result = ingest_client.ingest_from_arrow(table, ingestion_properties=ingestion_properties)
+        assert result.status == IngestionStatus.QUEUED
+
+        expected_url = "https://storageaccount.blob.core.windows.net/tempstorage/database__table__11111111-1111-1111-1111-111111111111__arrow_{0}_100_11111111-1111-1111-1111-111111111111.parquet?".format(
+            id(table)
+        )
+
+        assert_queued_upload(mock_put_message_in_queue, mock_upload_blob_from_stream, expected_url, format="parquet")
+        # The parquet file is uploaded as is, not compressed again
+        assert pq.read_table(io.BytesIO(uploaded[0])).equals(table)
+        assert ingestion_properties.format == DataFormat.CSV
+
+    @responses.activate
+    @patch("azure.kusto.ingest.managed_streaming_ingest_client.ManagedStreamingIngestClient.MAX_STREAMING_SIZE_IN_BYTES", new=0)
     @patch("azure.kusto.data.security._AadHelper.acquire_authorization_header", return_value=None)
     @patch("azure.storage.blob.BlobClient.upload_blob")
     @patch("azure.storage.queue.QueueClient.send_message")
