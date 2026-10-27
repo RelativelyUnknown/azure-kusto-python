@@ -564,9 +564,10 @@ class _ArrowConverter:
         return pa.array(ticks, type=pa.int64())
 
 
-def _table_columns_and_metadata(table: Any) -> Tuple[List[KustoResultColumn], Dict[str, str]]:
+def _check_table(table: Any) -> None:
+    """Validates a table given to the (synchronous) conversion functions."""
     if not table:
-        raise ValueError("The table has no columns")
+        raise ValueError("The table is missing or has no columns")
     if not isinstance(table, (KustoResultTable, KustoStreamingResultTable)):
         if isinstance(table, BaseStreamingKustoResultTable):
             raise TypeError(
@@ -575,7 +576,6 @@ def _table_columns_and_metadata(table: Any) -> Tuple[List[KustoResultColumn], Di
                 )
             )
         raise TypeError("Expected KustoResultTable or KustoStreamingResultTable got {}".format(type(table).__name__))
-    return table.columns, _table_metadata(table)
 
 
 def _table_metadata(table: Any) -> Dict[str, str]:
@@ -599,11 +599,12 @@ def _make_converter(
     errors: Errors,
     converters_by_type: Optional[Dict[str, ArrowConverter]],
     converters_by_column_name: Optional[Dict[str, ArrowConverter]],
+    check_table: Callable[[Any], None] = _check_table,
 ) -> _ArrowConverter:
-    columns, metadata = _table_columns_and_metadata(table)
+    check_table(table)
     return _ArrowConverter(
-        columns,
-        metadata,
+        table.columns,
+        _table_metadata(table),
         time_unit,
         decimal_as,
         decimal_precision,
@@ -613,6 +614,11 @@ def _make_converter(
         converters_by_type,
         converters_by_column_name,
     )
+
+
+def _check_batch_size(batch_size: int) -> None:
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive, got {}".format(batch_size))
 
 
 def _raw_rows(table: Union[KustoResultTable, KustoStreamingResultTable]) -> Iterable[list]:
@@ -671,6 +677,7 @@ def arrow_table_from_result_table(
         `combine_chunks` on the result if you need contiguous columns.
     :return: pyarrow Table.
     """
+    _check_batch_size(batch_size)
     converter = _make_converter(table, time_unit, decimal_as, decimal_precision, decimal_scale, guid_as, errors, converters_by_type, converters_by_column_name)
     batches = list(converter.iter_batches(_raw_rows(table), batch_size))
     return pa.Table.from_batches(batches, schema=converter.resolve_schema())
@@ -746,6 +753,7 @@ def arrow_record_batches_from_result_table(
     :param batch_size: The (maximal) number of rows in each batch.
     :return: An iterator of pyarrow RecordBatches.
     """
+    _check_batch_size(batch_size)
     converter = _make_converter(table, time_unit, decimal_as, decimal_precision, decimal_scale, guid_as, errors, converters_by_type, converters_by_column_name)
     return converter.iter_batches(_raw_rows(table), batch_size)
 
@@ -774,6 +782,7 @@ def arrow_reader_from_result_table(
     :param batch_size: The (maximal) number of rows in each batch.
     :return: pyarrow RecordBatchReader.
     """
+    _check_batch_size(batch_size)
     converter = _make_converter(table, time_unit, decimal_as, decimal_precision, decimal_scale, guid_as, errors, converters_by_type, converters_by_column_name)
     batches = converter.iter_batches(_raw_rows(table), batch_size)
     if converter.schema is None:
