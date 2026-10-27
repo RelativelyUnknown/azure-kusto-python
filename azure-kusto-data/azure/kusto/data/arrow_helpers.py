@@ -1,21 +1,22 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License
 """
-Conversion of Kusto results into `Apache Arrow <https://arrow.apache.org/>`_ structures.
+Convert Kusto results to `Apache Arrow <https://arrow.apache.org/>`_ structures.
 
-This module requires the optional `pyarrow` dependency: `pip install azure-kusto-data[pyarrow]`.
+This module requires the optional `pyarrow` package. Install it with `pip install azure-kusto-data[pyarrow]`.
+Importing the module without pyarrow raises `azure.kusto.data.exceptions.KustoArrowNotInstalledError`.
 
 The supported outputs are:
 
-* `arrow_table_from_result_table` - a single result table (full or streaming) as a `pyarrow.Table`.
-* `arrow_tables_from_response` - all (or only the primary) tables of a response as a list of `pyarrow.Table`.
-* `arrow_record_batches_from_result_table` / `arrow_reader_from_result_table` - a (streaming) result table as record batches,
-  without materializing it in memory.
-* `arrow_schema_from_result_table` - the Arrow schema a table would be converted to.
+* `arrow_table_from_result_table` - converts a result table (full or streaming) to a `pyarrow.Table`.
+* `arrow_tables_from_response` - converts all the tables of a response, or only the primary ones, to a list of `pyarrow.Table`.
+* `arrow_record_batches_from_result_table` and `arrow_reader_from_result_table` - convert a result table to record batches,
+  without holding the table in memory.
+* `arrow_schema_from_result_table` - returns the Arrow schema of a converted table.
 
 For asynchronous streaming results, see `azure.kusto.data.aio.arrow_helpers`.
 
-Type mapping (the default, can be changed with the options below or with converters):
+Type mapping (the defaults; use the options below or converters to change them):
 
 =====================  ==============================  =================================================
 Kusto type             Arrow type                      Notes
@@ -23,7 +24,7 @@ Kusto type             Arrow type                      Notes
 bool                   bool                            nulls are preserved
 int                    int32
 long                   int64
-real                   float64                         `NaN`, `Infinity` and `-Infinity` are supported
+real                   float64                         `NaN`, `Infinity`, and `-Infinity` are supported
 decimal                float64                         see `decimal_as`
 string                 string                          empty strings are kept as empty strings
 guid                   string                          see `guid_as`
@@ -32,32 +33,33 @@ timespan               duration[us]                    see `time_unit`
 dynamic                string                          compact JSON text
 =====================  ==============================  =================================================
 
-Every field of the resulting schema carries the original Kusto type in its metadata (`kusto.type`), and the schema
-carries the table's name, id and kind (`kusto.table_name`, `kusto.table_id` and `kusto.table_kind`).
+Every field keeps its Kusto type in its metadata (`kusto.type`). The schema keeps the name, ID, and kind of the table
+(`kusto.table_name`, `kusto.table_id`, and `kusto.table_kind`).
 
 Options shared by the conversion functions:
 
-:param time_unit: The resolution of the Arrow `timestamp` and `duration` types, `"us"` (the default) or `"ns"`.
-    Kusto keeps time in ticks of 100 nanoseconds, and a datetime covers the years 0001-9999.
-    Microseconds is the resolution the rest of the data ecosystem uses by default (Python's datetime, PyArrow, Polars, DuckDB,
-    Spark, Databricks, Delta, BigQuery and pandas 3), and it covers the entire range of a datetime. It drops the last digit of the
-    fraction of a second: a datetime is rounded down, and a timespan is truncated towards zero.
-    `"ns"` preserves every tick, but Arrow's nanosecond resolution only represents the years 1677-2262 (for timespans: about 292 years).
-    Values outside of this range, like `datetime(0001-01-01)` or `datetime(9999-12-31)`, are converted to nulls (or raise, see
-    `errors`). Also note that Spark, Databricks and Fabric can't read Parquet files with nanosecond timestamps.
-:param decimal_as: How to convert `decimal` columns: `"float64"` (the default, might lose precision), `"decimal128"` (exact,
-    using `decimal_precision` and `decimal_scale`, since Kusto does not report them) or `"string"`.
-:param decimal_precision: The precision of the Arrow `decimal128` type, when `decimal_as="decimal128"`.
-:param decimal_scale: The scale of the Arrow `decimal128` type, when `decimal_as="decimal128"`.
-:param guid_as: How to convert `guid` columns: `"string"` (the default) or `"uuid"` (the Arrow canonical `uuid` extension type,
-    which is the type to use when ingesting the data back into a `guid` column).
-:param errors: What to do with a value that can't be converted: `"coerce"` (the default) converts it to null,
-    `"raise"` raises a `ValueError`.
-:param converters_by_type: If given, converts the columns of the specified Kusto types differently than the default. The dictionary
-    maps from a Kusto data type (https://learn.microsoft.com/azure/data-explorer/kusto/query/scalar-data-types/) to either an Arrow
-    type (the values are converted with `pyarrow.array(values, type=...)`) or to a function that receives the column name and the
-    sequence of raw values of the column, and returns a `pyarrow.Array` of the same length.
-:param converters_by_column_name: Same as `converters_by_type`, but by column name. It takes precedence over `converters_by_type`.
+:param time_unit: The resolution of the Arrow `timestamp` and `duration` types, `"us"` or `"ns"`. Defaults to `"us"`.
+    Kusto counts time in ticks of 100 nanoseconds, and a datetime covers the years 0001-9999.
+    Microseconds are the default resolution of Python's datetime, PyArrow, Polars, DuckDB, Spark, Azure Databricks, Delta Lake,
+    BigQuery, and pandas 3. They cover the whole range of a datetime, but drop the last digit of the fraction of a second:
+    a datetime is rounded down, and a timespan is truncated toward zero.
+    Use `"ns"` to keep every tick. Arrow nanoseconds only cover the years 1677-2262 (about 292 years for a timespan),
+    so a value outside this range, such as `datetime(0001-01-01)` or `datetime(9999-12-31)`, becomes null, or raises an error
+    if `errors="raise"`. Spark, Azure Databricks, and Microsoft Fabric can't read Parquet files with nanosecond timestamps.
+:param decimal_as: How to convert `decimal` columns, `"float64"`, `"decimal128"`, or `"string"`. Defaults to `"float64"`, which might
+    lose precision. `"decimal128"` is exact. It uses `decimal_precision` and `decimal_scale`, because Kusto doesn't report them.
+:param decimal_precision: The precision of the Arrow `decimal128` type when `decimal_as="decimal128"`. Defaults to 38.
+:param decimal_scale: The scale of the Arrow `decimal128` type when `decimal_as="decimal128"`. Defaults to 18.
+:param guid_as: How to convert `guid` columns, `"string"` or `"uuid"`. Defaults to `"string"`. `"uuid"` uses the Arrow canonical `uuid`
+    extension type, the type to use when you ingest the data back into a `guid` column.
+:param errors: What to do with a value that can't be converted, `"coerce"` or `"raise"`. Defaults to `"coerce"`, which converts the
+    value to null. `"raise"` raises a `ValueError`.
+:param converters_by_type: Converts the columns of the given Kusto types differently than the default. Defaults to None.
+    The dictionary maps a Kusto data type (https://learn.microsoft.com/azure/data-explorer/kusto/query/scalar-data-types/) to
+    either an Arrow type or a function. An Arrow type converts the values with `pyarrow.array(values, type=...)`. A function receives
+    the column name and the sequence of raw values of the column, and returns a `pyarrow.Array` of the same length.
+:param converters_by_column_name: Same as `converters_by_type`, but by column name. Takes precedence over `converters_by_type`.
+    Defaults to None.
 """
 
 import json
@@ -649,11 +651,14 @@ def arrow_schema_from_result_table(
     converters_by_type: Optional[Dict[str, ArrowConverter]] = None,
     converters_by_column_name: Optional[Dict[str, ArrowConverter]] = None,
 ) -> "pa.Schema":
-    """Gets the Arrow schema a Kusto result table is converted to. No row is read from the table.
+    """Returns the Arrow schema that a Kusto result table is converted to. Doesn't read any row from the table.
     See the module documentation for the options.
 
     :param table: Table received from the response.
-    :raises ValueError: If a function is given as a converter, since the type it returns is only known after calling it.
+    :raises TypeError: If `table` isn't a `KustoResultTable` or a synchronous `KustoStreamingResultTable`, or a converter is neither
+        an Arrow type nor a function.
+    :raises ValueError: If `table` has no columns, an option has an invalid value, a column has a type that Kusto doesn't have and no
+        converter, or a function is given as a converter, because the type it returns is only known after calling it.
     :return: pyarrow Schema.
     """
     converter = _make_converter(table, time_unit, decimal_as, decimal_precision, decimal_scale, guid_as, errors, converters_by_type, converters_by_column_name)
@@ -675,15 +680,21 @@ def arrow_table_from_result_table(
     converters_by_type: Optional[Dict[str, ArrowConverter]] = None,
     converters_by_column_name: Optional[Dict[str, ArrowConverter]] = None,
 ) -> "pa.Table":
-    """Converts a Kusto result table into a pyarrow Table. The Arrow counterpart of `azure.kusto.data.helpers.dataframe_from_result_table`.
+    """Converts a Kusto result table to a pyarrow Table. The Arrow counterpart of `azure.kusto.data.helpers.dataframe_from_result_table`.
     See the module documentation for the options.
 
     A streaming table is read entirely, so it can't be read again. To keep the memory in check, use
     `arrow_reader_from_result_table`.
 
     :param table: Table received from the response.
-    :param batch_size: The number of rows converted at once. The columns of the result consist of chunks of this size, call
-        `combine_chunks` on the result if you need contiguous columns.
+    :param batch_size: The number of rows converted at once. Defaults to `DEFAULT_BATCH_SIZE` (65,536). The columns of the result
+        consist of chunks of this size. Call `combine_chunks` on the result if you need contiguous columns.
+    :raises TypeError: If `table` isn't a `KustoResultTable` or a synchronous `KustoStreamingResultTable`, a converter is neither
+        an Arrow type nor a function, or a converter function doesn't return an Arrow array.
+    :raises ValueError: If `table` has no columns, `batch_size` is less than 1, an option has an invalid value, a column has a type that
+        Kusto doesn't have and no converter, a row has more values than the table has columns, or a value can't be converted
+        and `errors="raise"`.
+    :raises azure.kusto.data.exceptions.KustoMultiApiError: If the service reports an error while a streaming table is read.
     :return: pyarrow Table.
     """
     _check_batch_size(batch_size)
@@ -706,15 +717,21 @@ def arrow_tables_from_response(
     converters_by_type: Optional[Dict[str, ArrowConverter]] = None,
     converters_by_column_name: Optional[Dict[str, ArrowConverter]] = None,
 ) -> List["pa.Table"]:
-    """Converts the tables of a Kusto response into pyarrow Tables.
+    """Converts the tables of a Kusto response to pyarrow Tables.
     See the module documentation for the options.
 
     The tables of a streaming response are read one after the other, so the entire response is read.
 
-    :param response: The response of `KustoClient.execute`, `execute_query`, `execute_mgmt` or `execute_streaming_query`.
-    :param primary_only: When True (the default), only the primary result tables are converted. Otherwise, all of the tables are,
-        including the tables with information about the query.
-    :param batch_size: The number of rows converted at once.
+    :param response: The response of `KustoClient.execute`, `execute_query`, `execute_mgmt`, or `execute_streaming_query`.
+    :param primary_only: If True, converts only the primary result tables. Otherwise, converts all the tables, including the tables with
+        information about the query. Defaults to True.
+    :param batch_size: The number of rows converted at once. Defaults to `DEFAULT_BATCH_SIZE` (65,536).
+    :raises TypeError: If `response` isn't a `KustoResponseDataSet` or a synchronous `KustoStreamingResponseDataSet`, or a converter is
+        neither an Arrow type nor a function.
+    :raises ValueError: If a table has no columns, `batch_size` is less than 1, an option has an invalid value, a column has a type that
+        Kusto doesn't have and no converter, a row has more values than the table has columns, or a value can't be converted
+        and `errors="raise"`.
+    :raises azure.kusto.data.exceptions.KustoMultiApiError: If the service reports an error while a streaming response is read.
     :return: A list of pyarrow Tables.
     """
     if isinstance(response, KustoResponseDataSet):
@@ -756,12 +773,19 @@ def arrow_record_batches_from_result_table(
     converters_by_type: Optional[Dict[str, ArrowConverter]] = None,
     converters_by_column_name: Optional[Dict[str, ArrowConverter]] = None,
 ) -> Iterator["pa.RecordBatch"]:
-    """Converts a Kusto result table into pyarrow RecordBatches, lazily: a batch is read from the table (and from the network,
-    in case of a streaming table) only when it is requested. An empty table yields no batches.
+    """Converts a Kusto result table to pyarrow RecordBatches, lazily: a batch is read from the table (and from the network,
+    for a streaming table) only when you request it. An empty table yields no batches.
     See the module documentation for the options.
 
     :param table: Table received from the response.
-    :param batch_size: The (maximal) number of rows in each batch.
+    :param batch_size: The maximal number of rows in each batch. Defaults to `DEFAULT_BATCH_SIZE` (65,536).
+    :raises TypeError: If `table` isn't a `KustoResultTable` or a synchronous `KustoStreamingResultTable`, or a converter is neither
+        an Arrow type nor a function. Raised when you call the function. While you iterate, also if a converter function doesn't
+        return an Arrow array.
+    :raises ValueError: If `table` has no columns, `batch_size` is less than 1, an option has an invalid value, or a column has a type that
+        Kusto doesn't have and no converter. Raised when you call the function. While you iterate, also if a row has more values than
+        the table has columns, or a value can't be converted and `errors="raise"`.
+    :raises azure.kusto.data.exceptions.KustoMultiApiError: While you iterate, if the service reports an error.
     :return: An iterator of pyarrow RecordBatches.
     """
     _check_batch_size(batch_size)
@@ -782,15 +806,22 @@ def arrow_reader_from_result_table(
     converters_by_type: Optional[Dict[str, ArrowConverter]] = None,
     converters_by_column_name: Optional[Dict[str, ArrowConverter]] = None,
 ) -> "pa.RecordBatchReader":
-    """Converts a Kusto result table into a pyarrow RecordBatchReader, which reads the table lazily, batch by batch.
-    The reader can be consumed by anything which understands Arrow streams, like `pyarrow.parquet.ParquetWriter`.
+    """Converts a Kusto result table to a pyarrow RecordBatchReader, which reads the table lazily, batch by batch.
+    Anything that understands Arrow streams can consume the reader, such as `pyarrow.parquet.ParquetWriter`.
     See the module documentation for the options.
 
-    The schema of the reader is available before reading any row, unless a function was given as a converter, in which case the
-    first batch is read ahead to learn it.
+    The schema of the reader is available before any row is read, unless you give a function as a converter. In that case, the
+    function reads the first batch ahead to learn the schema.
 
     :param table: Table received from the response.
-    :param batch_size: The (maximal) number of rows in each batch.
+    :param batch_size: The maximal number of rows in each batch. Defaults to `DEFAULT_BATCH_SIZE` (65,536).
+    :raises TypeError: If `table` isn't a `KustoResultTable` or a synchronous `KustoStreamingResultTable`, or a converter is neither
+        an Arrow type nor a function. Raised when you call the function. While you read, also if a converter function doesn't
+        return an Arrow array.
+    :raises ValueError: If `table` has no columns, `batch_size` is less than 1, an option has an invalid value, or a column has a type that
+        Kusto doesn't have and no converter. Raised when you call the function. While you read, also if a row has more values than
+        the table has columns, or a value can't be converted and `errors="raise"`.
+    :raises azure.kusto.data.exceptions.KustoMultiApiError: While you read, if the service reports an error.
     :return: pyarrow RecordBatchReader.
     """
     _check_batch_size(batch_size)

@@ -13,12 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `arrow_record_batches_from_result_table`, `arrow_reader_from_result_table` and `arrow_schema_from_result_table`. All of Kusto's data types are supported,
   and streaming results are converted batch by batch.
   - Kusto's `datetime` and `timespan` are converted to Arrow's microsecond resolution by default, as most data tools expect (Python, PyArrow, pandas 3, Polars, DuckDB,
-    Spark, Databricks, Delta, BigQuery). That covers the entire range of a datetime (the years 0001-9999) and drops the last digit of the fraction of a second.
-    Pass `time_unit="ns"` to keep every tick of 100 nanoseconds. Arrow's nanoseconds only cover the years 1677-2262 (anything else is converted to null), and
-    Spark, Databricks and Fabric can't read Parquet files with nanosecond timestamps.
+    Spark, Azure Databricks, Delta Lake, and BigQuery). Microseconds cover the entire range of a datetime (the years 0001-9999) and drop the last digit of the fraction of a second.
+    Pass `time_unit="ns"` to keep every tick of 100 nanoseconds. Arrow nanoseconds only cover the years 1677-2262 (anything else is converted to null), and
+    Spark, Azure Databricks, and Microsoft Fabric can't read Parquet files with nanosecond timestamps.
 - `azure.kusto.data.aio.arrow_helpers`, to convert the streaming results of the async client to Arrow.
 - `ingest_from_arrow`, to ingest Arrow tables, record batches, record batch readers and other Arrow streams, as Parquet.
-  - Timestamps are written with microsecond resolution (a `timestamp[ns]` column is truncated), as Spark, Databricks and Fabric can't read nanosecond timestamps in Parquet.
+  - Timestamps are written with microsecond resolution (a `timestamp[ns]` column is truncated), because Spark, Azure Databricks, and Microsoft Fabric can't read nanosecond timestamps in Parquet.
     Pass `parquet_options={"coerce_timestamps": None}` to write them as they are. To keep every tick of 100 nanoseconds, ingest the column as integer nanoseconds
     with a Parquet mapping that uses the `DateTimeFromUnixNanoseconds` transformation (see the README).
 
