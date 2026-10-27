@@ -72,17 +72,17 @@ class TestTypeMapping:
             ("guid", pa.string(), "guid"),
             ("uuid", pa.string(), "guid"),
             ("uniqueid", pa.string(), "guid"),
-            ("datetime", pa.timestamp("ns", "UTC"), "datetime"),
-            ("date", pa.timestamp("ns", "UTC"), "datetime"),
-            ("timespan", pa.duration("ns"), "timespan"),
-            ("time", pa.duration("ns"), "timespan"),
+            ("datetime", pa.timestamp("us", "UTC"), "datetime"),
+            ("date", pa.timestamp("us", "UTC"), "datetime"),
+            ("timespan", pa.duration("us"), "timespan"),
+            ("time", pa.duration("us"), "timespan"),
             ("dynamic", pa.string(), "dynamic"),
             # The .NET names, which the management API reports
             ("String", pa.string(), "string"),
             ("Int32", pa.int32(), "int"),
             ("Int64", pa.int64(), "long"),
-            ("DateTime", pa.timestamp("ns", "UTC"), "datetime"),
-            ("TimeSpan", pa.duration("ns"), "timespan"),
+            ("DateTime", pa.timestamp("us", "UTC"), "datetime"),
+            ("TimeSpan", pa.duration("us"), "timespan"),
             ("Guid", pa.string(), "guid"),
             ("SByte", pa.bool_(), "bool"),
             ("Double", pa.float64(), "real"),
@@ -95,6 +95,12 @@ class TestTypeMapping:
         assert schema.field("c").type == expected
         assert schema.field("c").metadata == {KUSTO_TYPE_METADATA_KEY.encode(): kusto_type.encode()}
 
+    def test_nanosecond_types(self):
+        table = KustoResultTable(
+            {"TableName": "T", "Columns": [{"ColumnName": "dt", "ColumnType": "datetime"}, {"ColumnName": "ts", "ColumnType": "timespan"}], "Rows": []}
+        )
+        assert [field.type for field in arrow_schema_from_result_table(table, time_unit="ns")] == [pa.timestamp("ns", "UTC"), pa.duration("ns")]
+
     def test_options_change_types(self):
         table = KustoResultTable(
             {
@@ -104,8 +110,8 @@ class TestTypeMapping:
                 "Rows": [],
             }
         )
-        schema = arrow_schema_from_result_table(table, time_unit="us", decimal_as="decimal128", decimal_precision=20, decimal_scale=4, guid_as="uuid")
-        assert [field.type for field in schema] == [pa.timestamp("us", "UTC"), pa.duration("us"), pa.decimal128(20, 4), pa.uuid()]
+        schema = arrow_schema_from_result_table(table, time_unit="ns", decimal_as="decimal128", decimal_precision=20, decimal_scale=4, guid_as="uuid")
+        assert [field.type for field in schema] == [pa.timestamp("ns", "UTC"), pa.duration("ns"), pa.decimal128(20, 4), pa.uuid()]
         assert arrow_schema_from_result_table(table, decimal_as="string").field("dec").type == pa.string()
 
     def test_unknown_type(self):
@@ -133,6 +139,10 @@ class TestTable:
         table = arrow_table_from_result_table(load_response("deft.json").primary_results[0])
         KustoClientTestsMixin._assert_sanity_arrow_response(table)
 
+    def test_sanity_nanoseconds(self):
+        table = arrow_table_from_result_table(load_response("deft.json").primary_results[0], time_unit="ns")
+        KustoClientTestsMixin._assert_sanity_arrow_response(table, "ns")
+
     def test_metadata(self):
         table = arrow_table_from_result_table(load_response("deft.json").primary_results[0])
         assert table.schema.metadata == {
@@ -148,7 +158,7 @@ class TestTable:
 
     def test_matches_pandas(self):
         source = load_response("deft.json").primary_results[0]
-        arrow_frame = arrow_table_from_result_table(source).to_pandas()
+        arrow_frame = arrow_table_from_result_table(source, time_unit="ns").to_pandas()  # pandas converts to nanoseconds
         pandas_frame = dataframe_from_result_table(source)
         # xtime is not compared: the pandas conversion reads a negative timespan with days, like "-2.00:00:02", as -2 days and +2 seconds
         for column in ["rownumber", "xdouble", "xint64", "xdate", "xsmalltext"]:
@@ -158,9 +168,9 @@ class TestTable:
                 else:
                     assert arrow_value == pandas_value, column
 
-    def test_special_values(self):
+    def test_special_values_nanoseconds(self):
         source = load_response("dataframe.json").primary_results[0]
-        table = arrow_table_from_result_table(source, converters_by_column_name={"MissingType": pa.string()})
+        table = arrow_table_from_result_table(source, time_unit="ns", converters_by_column_name={"MissingType": pa.string()})
         assert table.num_rows == 8
         real = table.column("RecordReal").to_pylist()
         assert real[0] == 3.14159
@@ -182,12 +192,18 @@ class TestTable:
         assert table.column("RecordBool").to_pylist() == [True] * 7 + [False]
         assert table.column("RecordGUID").to_pylist()[7] is None
 
-    def test_special_values_microseconds(self):
+    def test_special_values(self):
         source = load_response("dataframe.json").primary_results[0]
-        table = arrow_table_from_result_table(source, time_unit="us", converters_by_column_name={"MissingType": pa.string()})
+        table = arrow_table_from_result_table(source, converters_by_column_name={"MissingType": pa.string()})
+        assert table.schema.field("RecordTime").type == pa.timestamp("us", "UTC")
+        real = table.column("RecordReal").to_pylist()
+        assert real[0] == 3.14159 and math.isnan(real[1]) and real[2:4] == [math.inf, -math.inf] and real[7] is None
         times = as_ints(table.column("RecordTime").combine_chunks())
+        # Unlike with nanoseconds, the earliest and latest datetimes of Kusto are not lost
         assert times[1] == -62167219200 * 10**6  # The fixture's "0000-01-01" is accepted as well
         assert times[2] == utc_seconds(9999, 12, 31, 23, 59, 59) * 10**6
+        assert times[0] == utc_seconds(2021, 12, 22, 11, 43) * 10**6
+        assert times[7] is None
         assert as_ints(table.column("RecordOffset").combine_chunks())[6] == (24 * 3600 + 3661) * 10**6
 
     def test_null_values(self):
@@ -225,7 +241,7 @@ class TestTable:
 
         info = arrow_tables_from_response(response, primary_only=False)[2]
         assert [field.type for field in info.schema] == [
-            pa.timestamp("ns", "UTC"),
+            pa.timestamp("us", "UTC"),
             pa.int32(),
             pa.string(),
             pa.int32(),
@@ -240,7 +256,7 @@ class TestTable:
     def test_version_command(self):
         table = arrow_table_from_result_table(load_response("versionshowcommandresult.json", v1=True).primary_results[0])
         assert table.column("BuildVersion").to_pylist() == ["1.0.6693.14577"]
-        assert as_ints(table.column("BuildTime").combine_chunks()) == [utc_seconds(2018, 4, 29, 8, 5, 54) * 10**9]
+        assert as_ints(table.column("BuildTime").combine_chunks()) == [utc_seconds(2018, 4, 29, 8, 5, 54) * 10**6]
 
     def test_batch_size(self):
         table = make_table("long", list(range(10)))
@@ -364,7 +380,7 @@ class TestDatetime:
         ],
     )
     def test_nanoseconds(self, value, seconds, ticks):
-        result = convert("datetime", [value])
+        result = convert("datetime", [value], time_unit="ns")
         assert result.type == pa.timestamp("ns", "UTC")
         assert as_ints(result) == [seconds * 10**9 + ticks * 100]
 
@@ -373,9 +389,9 @@ class TestDatetime:
         ["0001-01-01T00:00:00Z", "9999-12-31T23:59:59.9999999Z", "1677-09-21T00:12:43.1452241Z", "2262-04-11T23:47:16.8547759Z", "2262-04-11T23:47:17Z"],
     )
     def test_nanoseconds_out_of_range(self, value):
-        assert convert("datetime", [value]).to_pylist() == [None]
+        assert convert("datetime", [value], time_unit="ns").to_pylist() == [None]
         with pytest.raises(ValueError, match="time_unit='us'"):
-            convert("datetime", [value], errors="raise")
+            convert("datetime", [value], time_unit="ns", errors="raise")
 
     @pytest.mark.parametrize(
         "value, microseconds",
@@ -388,37 +404,43 @@ class TestDatetime:
         ],
     )
     def test_microseconds(self, value, microseconds):
-        result = convert("datetime", [value], time_unit="us")
+        result = convert("datetime", [value])  # The default
         assert result.type == pa.timestamp("us", "UTC")
         assert as_ints(result) == [microseconds]
+        assert as_ints(convert("datetime", [value], time_unit="us")) == [microseconds]
 
-    def test_nulls_and_garbage(self):
+    @pytest.mark.parametrize("unit, per_second", [("us", 10**6), ("ns", 10**9)])
+    def test_nulls_and_garbage(self, unit, per_second):
         values = [None, "", "garbage", "2021-12-22T11:43:00Z"]
-        assert as_ints(convert("datetime", values)) == [None, None, None, utc_seconds(2021, 12, 22, 11, 43) * 10**9]
+        assert as_ints(convert("datetime", values, time_unit=unit)) == [None, None, None, utc_seconds(2021, 12, 22, 11, 43) * per_second]
         with pytest.raises(ValueError, match="garbage"):
-            convert("datetime", ["garbage"], errors="raise")
+            convert("datetime", ["garbage"], time_unit=unit, errors="raise")
         with pytest.raises(ValueError, match="column 'c'"):
-            convert("datetime", [""], errors="raise")
+            convert("datetime", [""], time_unit=unit, errors="raise")
 
-    def test_other_formats(self):
+    @pytest.mark.parametrize("unit, per_second", [("us", 10**6), ("ns", 10**9)])
+    def test_other_formats(self, unit, per_second):
         values = ["2021-12-22 11:43:00", "2021-12-22T11:43:00+01:00", "2021-12-22T11:43:00.5-02:30", "20211222T114300Z"]
         expected = [
-            utc_seconds(2021, 12, 22, 11, 43) * 10**9,
-            utc_seconds(2021, 12, 22, 10, 43) * 10**9,
-            utc_seconds(2021, 12, 22, 14, 13) * 10**9 + 5 * 10**8,
-            utc_seconds(2021, 12, 22, 11, 43) * 10**9,
+            utc_seconds(2021, 12, 22, 11, 43) * per_second,
+            utc_seconds(2021, 12, 22, 10, 43) * per_second,
+            utc_seconds(2021, 12, 22, 14, 13) * per_second + per_second // 2,
+            utc_seconds(2021, 12, 22, 11, 43) * per_second,
         ]
-        assert as_ints(convert("datetime", values)) == expected
+        assert as_ints(convert("datetime", values, time_unit=unit)) == expected
 
-    def test_all_null_column(self):
-        result = convert("datetime", [None, None])
-        assert result.type == pa.timestamp("ns", "UTC")
+    @pytest.mark.parametrize("unit", ["us", "ns"])
+    def test_all_null_column(self, unit):
+        result = convert("datetime", [None, None], time_unit=unit)
+        assert result.type == pa.timestamp(unit, "UTC")
         assert result.null_count == 2
-        assert convert("datetime", []).type == pa.timestamp("ns", "UTC")
+        assert convert("datetime", [], time_unit=unit).type == pa.timestamp(unit, "UTC")
 
-    def test_non_string_values(self):
-        assert as_ints(convert("datetime", [None, 12.5, True])) == [None, None, None]
-        assert as_ints(convert("datetime", [20211222])) == [utc_seconds(2021, 12, 22) * 10**9]  # An ISO 8601 basic format date
+    @pytest.mark.parametrize("unit, per_second", [("us", 10**6), ("ns", 10**9)])
+    def test_non_string_values(self, unit, per_second):
+        assert as_ints(convert("datetime", [None, 12.5, True], time_unit=unit)) == [None, None, None]
+        # An ISO 8601 basic format date
+        assert as_ints(convert("datetime", [20211222], time_unit=unit)) == [utc_seconds(2021, 12, 22) * per_second]
 
 
 class TestTimespan:
@@ -448,17 +470,18 @@ class TestTimespan:
         # Truncated towards zero
         assert as_ints(microseconds) == [(abs(ticks) // 10) * (-1 if ticks < 0 else 1)]
 
-    def test_nulls_and_garbage(self):
-        assert as_ints(convert("timespan", [None, "", "garbage", "1:2:3", True, "00:00:01"])) == [None, None, None, None, None, 10**9]
+    @pytest.mark.parametrize("unit, per_second", [("us", 10**6), ("ns", 10**9)])
+    def test_nulls_and_garbage(self, unit, per_second):
+        assert as_ints(convert("timespan", [None, "", "garbage", "1:2:3", True, "00:00:01"], time_unit=unit)) == [None, None, None, None, None, per_second]
         with pytest.raises(ValueError, match="garbage"):
-            convert("timespan", ["garbage"], errors="raise")
+            convert("timespan", ["garbage"], time_unit=unit, errors="raise")
 
     def test_out_of_range_nanoseconds(self):
         value = "106752.00:00:00"  # 64 bits of nanoseconds hold up to 106751.99 days
-        assert convert("timespan", [value]).to_pylist() == [None]
-        assert as_ints(convert("timespan", [value], time_unit="us")) == [106752 * 24 * 3600 * 10**6]
+        assert convert("timespan", [value], time_unit="ns").to_pylist() == [None]
+        assert as_ints(convert("timespan", [value])) == [106752 * 24 * 3600 * 10**6]  # Microseconds are the default
         with pytest.raises(ValueError, match="nanosecond"):
-            convert("timespan", [value], errors="raise")
+            convert("timespan", [value], time_unit="ns", errors="raise")
 
     def test_absurd_numbers(self):
         absurd = [10**30, -(10**30), 1e30, float("inf")]
@@ -469,7 +492,7 @@ class TestTimespan:
 
     def test_boundaries(self):
         limit = (2**63 - 1) // 100
-        assert as_ints(convert("timespan", [limit, -limit, limit + 1])) == [limit * 100, -limit * 100, None]
+        assert as_ints(convert("timespan", [limit, -limit, limit + 1], time_unit="ns")) == [limit * 100, -limit * 100, None]
 
 
 class TestConverters:
@@ -577,8 +600,8 @@ class TestResponse:
         assert tables[2].num_rows == 2
 
     def test_options_are_passed(self):
-        tables = arrow_tables_from_response(load_response("deft.json"), time_unit="us", batch_size=5)
-        assert tables[0].schema.field("xdate").type == pa.timestamp("us", "UTC")
+        tables = arrow_tables_from_response(load_response("deft.json"), time_unit="ns", batch_size=5)
+        assert tables[0].schema.field("xdate").type == pa.timestamp("ns", "UTC")
         assert [len(chunk) for chunk in tables[0].column("xdate").chunks] == [5, 5, 1]
 
     def test_invalid_response(self):

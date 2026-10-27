@@ -92,11 +92,12 @@ data types. To use it, install the package with the "pyarrow" extra:
     streaming_response = client.execute_streaming_query(db, "StormEvents")
     reader = arrow_reader_from_result_table(next(streaming_response.iter_primary_results()))  # A pyarrow.RecordBatchReader
 
-Kusto's datetime and timespan have a resolution of 100 nanoseconds and cover the years 0001-9999. By default they are converted to Arrow's
-nanoseconds resolution, which preserves every tick, but covers only the years 1677-2262: a datetime outside of this range, like
-``datetime(9999-12-31)``, is converted to null. Use ``time_unit="us"`` to convert them to microseconds, which covers the entire range
-but drops the last digit of the fraction of a second. See the documentation of ``azure.kusto.data.arrow_helpers`` for the type mapping
-and the other options.
+Kusto stores a datetime as a count of ticks of 100 nanoseconds and covers the years 0001-9999 (a timespan is counted in ticks as well).
+By default they are converted to Arrow's microsecond resolution, like most data tools expect (Python, PyArrow, pandas 3, Polars, DuckDB,
+Spark, Databricks, Delta and BigQuery). That covers the entire range, but drops the last digit of the fraction of a second.
+Use ``time_unit="ns"`` to keep every tick. Arrow's nanoseconds only cover the years 1677-2262, so a datetime outside of this range, like
+``datetime(9999-12-31)``, is converted to null, and Spark, Databricks and Fabric cannot read Parquet files with nanosecond timestamps.
+See the documentation of ``azure.kusto.data.arrow_helpers`` for the type mapping and the other options.
 
 Streaming results of the async client are converted with ``azure.kusto.data.aio.arrow_helpers``.
 

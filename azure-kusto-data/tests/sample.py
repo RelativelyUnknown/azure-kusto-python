@@ -120,9 +120,9 @@ from azure.kusto.data.arrow_helpers import arrow_reader_from_result_table, arrow
 arrow_table = arrow_table_from_result_table(response.primary_results[0])
 print(arrow_table)
 
-# Kusto's datetime and timespan are converted with a resolution of nanoseconds by default, which can't represent the years before 1677 or after 2262.
-# Convert them to microseconds to cover the entire range
-arrow_table = arrow_table_from_result_table(response.primary_results[0], time_unit="us")
+# Kusto's datetime and timespan are converted with a resolution of microseconds by default, like most data tools expect.
+# To keep every tick of 100 nanoseconds use time_unit="ns", which only covers the years 1677-2262 (and can't be read from Parquet by Spark or Databricks)
+arrow_table = arrow_table_from_result_table(response.primary_results[0], time_unit="ns")
 
 # Streaming Query - rather than reading everything ahead, iterate through results as they come
 multiple_tables = 'StormEvents | where EventType == "Heavy Rain" | take 10; StormEvents | where EventType == "Tornado" | take 10'

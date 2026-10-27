@@ -100,8 +100,8 @@ class TestAsyncArrow:
     @pytest.mark.asyncio
     async def test_options(self):
         first = await streaming_response(two_primary_tables(3)).iter_primary_results().__anext__()
-        table = await arrow_table_from_streaming_result_table(first, time_unit="us", converters_by_column_name={"x": pa.int8()})
-        assert [field.type for field in table.schema] == [pa.int8(), pa.duration("us")]
+        table = await arrow_table_from_streaming_result_table(first, time_unit="ns", converters_by_column_name={"x": pa.int8()})
+        assert [field.type for field in table.schema] == [pa.int8(), pa.duration("ns")]
 
     @pytest.mark.asyncio
     async def test_all_the_primary_tables(self):

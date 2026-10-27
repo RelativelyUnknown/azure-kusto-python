@@ -380,20 +380,26 @@ class KustoClientTestsMixin:
         assert_frame_equal(data_frame, expected_data_frame)
 
     @staticmethod
-    def _assert_sanity_arrow_response(table: "pyarrow.Table"):
+    def _assert_sanity_arrow_response(table: "pyarrow.Table", time_unit: str = "us"):
         import calendar
         import json
 
         import pyarrow as pa
 
-        def utc_nanoseconds(year: int, ticks: int) -> int:
-            return calendar.timegm((year, 1, 1, 1, 1, 1, 0, 0, 0)) * 10**9 + ticks * 100
+        def to_unit(ticks: int) -> int:
+            """Converts ticks of 100 nanoseconds to the resolution of the table, truncating towards zero (all of the datetimes here are positive)"""
+            if time_unit == "ns":
+                return ticks * 100
+            return abs(ticks) // 10 * (-1 if ticks < 0 else 1)
 
-        def time_nanoseconds(i: int) -> int:
+        def utc_time(year: int, ticks: int) -> int:
+            return to_unit(calendar.timegm((year, 1, 1, 1, 1, 1, 0, 0, 0)) * 10**7 + ticks)
+
+        def time_span(i: int) -> int:
             if i == 0:
                 return 0
             ticks = (i * 24 * 3600 + i) * 10**7 + i * 10001
-            return ticks * 100 if i % 2 == 1 else -ticks * 100
+            return to_unit(ticks if i % 2 == 1 else -ticks)
 
         numbers = range(10)
         # The first row of the query is a row of nulls (empty strings), the others are numbered
@@ -410,11 +416,11 @@ class KustoClientTestsMixin:
             "xuint16": pa.array([None, *numbers], type=pa.int64()),
             "xuint32": pa.array([None, *numbers], type=pa.int64()),
             "xuint64": pa.array([None, *numbers], type=pa.int64()),
-            "xdate": pa.array([None] + [utc_nanoseconds(2014 + i, i) for i in numbers], type=pa.int64()).cast(pa.timestamp("ns", "UTC")),
+            "xdate": pa.array([None] + [utc_time(2014 + i, i) for i in numbers], type=pa.int64()).cast(pa.timestamp(time_unit, "UTC")),
             "xsmalltext": pa.array([""] + DIGIT_WORDS[:10], type=pa.string()),
             "xtext": pa.array([""] + DIGIT_WORDS[:10], type=pa.string()),
             "xnumberAsText": pa.array([""] + [str(i) for i in numbers], type=pa.string()),
-            "xtime": pa.array([None] + [time_nanoseconds(i) for i in numbers], type=pa.int64()).cast(pa.duration("ns")),
+            "xtime": pa.array([None] + [time_span(i) for i in numbers], type=pa.int64()).cast(pa.duration(time_unit)),
             "xtextWithNulls": pa.array([""] * 11, type=pa.string()),
             "xdynamicWithNulls": pa.array(["", ""] + [json.dumps({"rowId": i, "arr": [0, i]}, separators=(",", ":")) for i in range(1, 10)], type=pa.string()),
         }

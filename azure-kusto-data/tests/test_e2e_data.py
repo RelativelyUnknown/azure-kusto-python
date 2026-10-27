@@ -306,7 +306,7 @@ class TestE2E:
     )
 
     @staticmethod
-    def _assert_arrow_all_types(table, time_unit="ns"):
+    def _assert_arrow_all_types(table, time_unit="us"):
         import pyarrow as pa
 
         assert table.num_rows == 1
@@ -355,7 +355,7 @@ class TestE2E:
         with self.get_client() as client:
             response = client.execute_query(self.test_db, self.ARROW_ALL_TYPES_QUERY)
             self._assert_arrow_all_types(arrow_table_from_result_table(response.primary_results[0]))
-            self._assert_arrow_all_types(arrow_table_from_result_table(response.primary_results[0], time_unit="us"), "us")
+            self._assert_arrow_all_types(arrow_table_from_result_table(response.primary_results[0], time_unit="ns"), "ns")
 
     def test_arrow_streaming(self):
         pytest.importorskip("pyarrow")

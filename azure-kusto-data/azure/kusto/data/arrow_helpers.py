@@ -27,8 +27,8 @@ real                   float64                         `NaN`, `Infinity` and `-I
 decimal                float64                         see `decimal_as`
 string                 string                          empty strings are kept as empty strings
 guid                   string                          see `guid_as`
-datetime               timestamp[ns, UTC]              see `time_unit`
-timespan               duration[ns]                    see `time_unit`
+datetime               timestamp[us, UTC]              see `time_unit`
+timespan               duration[us]                    see `time_unit`
 dynamic                string                          compact JSON text
 =====================  ==============================  =================================================
 
@@ -37,11 +37,14 @@ carries the table's name, id and kind (`kusto.table_name`, `kusto.table_id` and 
 
 Options shared by the conversion functions:
 
-:param time_unit: The resolution of the Arrow `timestamp` and `duration` types, `"ns"` (the default) or `"us"`.
-    Kusto keeps time in ticks of 100 nanoseconds, in the years 0001-9999. Arrow's nanosecond resolution preserves every tick
-    but can only represent the years 1677-2262 (for timespans: about 292 years); values outside of this range, like
-    `datetime(0001-01-01)` or `datetime(9999-12-31)`, are converted to nulls (or raise, see `errors`).
-    The microsecond resolution covers the entire Kusto range, but truncates the last digit of the fraction of a second.
+:param time_unit: The resolution of the Arrow `timestamp` and `duration` types, `"us"` (the default) or `"ns"`.
+    Kusto keeps time in ticks of 100 nanoseconds, and a datetime covers the years 0001-9999.
+    Microseconds is the resolution the rest of the data ecosystem uses by default (Python's datetime, PyArrow, Polars, DuckDB,
+    Spark, Databricks, Delta, BigQuery and pandas 3), and it covers the entire range of a datetime. It drops the last digit of the
+    fraction of a second: a datetime is rounded down, and a timespan is truncated towards zero.
+    `"ns"` preserves every tick, but Arrow's nanosecond resolution only represents the years 1677-2262 (for timespans: about 292 years).
+    Values outside of this range, like `datetime(0001-01-01)` or `datetime(9999-12-31)`, are converted to nulls (or raise, see
+    `errors`). Also note that Spark, Databricks and Fabric can't read Parquet files with nanosecond timestamps.
 :param decimal_as: How to convert `decimal` columns: `"float64"` (the default, might lose precision), `"decimal128"` (exact,
     using `decimal_precision` and `decimal_scale`, since Kusto does not report them) or `"string"`.
 :param decimal_precision: The precision of the Arrow `decimal128` type, when `decimal_as="decimal128"`.
@@ -637,7 +640,7 @@ def _raw_rows(table: Union[KustoResultTable, KustoStreamingResultTable]) -> Iter
 def arrow_schema_from_result_table(
     table: Union[KustoResultTable, KustoStreamingResultTable],
     *,
-    time_unit: TimeUnit = "ns",
+    time_unit: TimeUnit = "us",
     decimal_as: DecimalAs = "float64",
     decimal_precision: int = 38,
     decimal_scale: int = 18,
@@ -663,7 +666,7 @@ def arrow_table_from_result_table(
     table: Union[KustoResultTable, KustoStreamingResultTable],
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
-    time_unit: TimeUnit = "ns",
+    time_unit: TimeUnit = "us",
     decimal_as: DecimalAs = "float64",
     decimal_precision: int = 38,
     decimal_scale: int = 18,
@@ -694,7 +697,7 @@ def arrow_tables_from_response(
     *,
     primary_only: bool = True,
     batch_size: int = DEFAULT_BATCH_SIZE,
-    time_unit: TimeUnit = "ns",
+    time_unit: TimeUnit = "us",
     decimal_as: DecimalAs = "float64",
     decimal_precision: int = 38,
     decimal_scale: int = 18,
@@ -744,7 +747,7 @@ def arrow_record_batches_from_result_table(
     table: Union[KustoResultTable, KustoStreamingResultTable],
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
-    time_unit: TimeUnit = "ns",
+    time_unit: TimeUnit = "us",
     decimal_as: DecimalAs = "float64",
     decimal_precision: int = 38,
     decimal_scale: int = 18,
@@ -770,7 +773,7 @@ def arrow_reader_from_result_table(
     table: Union[KustoResultTable, KustoStreamingResultTable],
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
-    time_unit: TimeUnit = "ns",
+    time_unit: TimeUnit = "us",
     decimal_as: DecimalAs = "float64",
     decimal_precision: int = 38,
     decimal_scale: int = 18,

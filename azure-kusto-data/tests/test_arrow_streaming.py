@@ -88,7 +88,7 @@ class TestStreamingArrow:
         tables = arrow_tables_from_response(streaming_response(two_primary_tables(3)), batch_size=2)
         assert [table.schema.metadata[b"kusto.table_name"] for table in tables] == [b"First", b"Second"]
         assert [table.column("x").to_pylist() for table in tables] == [[0, 1, 2], [100, 101, 102]]
-        assert tables[0].schema.field("t").type == pa.timestamp("ns", "UTC")
+        assert tables[0].schema.field("t").type == pa.timestamp("us", "UTC")
 
     def test_reader_with_pyarrow_consumers(self):
         response = streaming_response(two_primary_tables(7))

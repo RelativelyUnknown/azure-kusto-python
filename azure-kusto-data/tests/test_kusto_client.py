@@ -80,7 +80,7 @@ class TestKustoClient(KustoClientTestsMixin):
         with KustoClient(self.HOST) as client:
             tables = arrow_tables_from_response(client.execute_mgmt("NetDefaultDB", ".show version"))
             assert len(tables) == 1
-            assert tables[0].schema.field("BuildTime").type == pyarrow.timestamp("ns", "UTC")
+            assert tables[0].schema.field("BuildTime").type == pyarrow.timestamp("us", "UTC")
             assert tables[0].column("BuildVersion").to_pylist() == ["1.0.6693.14577"]
 
     @patch("requests.Session.post", side_effect=mocked_requests_post)
