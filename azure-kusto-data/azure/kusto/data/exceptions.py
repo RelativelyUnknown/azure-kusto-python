@@ -191,6 +191,13 @@ class KustoAioSyntaxError(SyntaxError):
         super().__init__("Aio modules not installed, run 'pip install azure-kusto-data[aio]' to leverage aio capabilities")
 
 
+class KustoArrowNotInstalledError(ImportError):
+    """Raised when trying to use the Arrow capabilities without installing pyarrow"""
+
+    def __init__(self, package: str = "azure-kusto-data"):
+        super().__init__("PyArrow is not installed, run 'pip install {}[pyarrow]' to leverage the Arrow capabilities".format(package))
+
+
 class KustoAsyncUsageError(Exception):
     """Raised when trying to use async methods on a sync object, and vice-versa"""
 

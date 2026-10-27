@@ -17,3 +17,13 @@ class KustoStreamingResultTable(BaseStreamingKustoResultTable):
 
     def __aiter__(self) -> AsyncIterator[KustoResultRow]:
         return self
+
+    async def _aiter_raw_rows(self) -> AsyncIterator[list]:
+        """
+        Iterates over the raw (unconverted) rows, while keeping `row_count` and `finished` up to date,
+        so that the response data set can advance to the next table once this one is exhausted.
+        """
+        async for row in self.raw_rows:
+            self.row_count += 1
+            yield row
+        self.finished = True

@@ -82,6 +82,17 @@ class TestKustoClient(KustoClientTestsMixin):
         data_frame = dataframe_from_result_table(response.primary_results[0])
         self._assert_sanity_data_frame_response(data_frame)
 
+    @pytest.mark.asyncio
+    async def test_sanity_arrow(self):
+        pytest.importorskip("pyarrow")
+        from azure.kusto.data.arrow_helpers import arrow_table_from_result_table
+
+        with aioresponses() as aioresponses_mock:
+            self._mock_query(aioresponses_mock)
+            async with KustoClient(self.HOST) as client:
+                response = await client.execute_query("PythonTest", "Deft")
+        self._assert_sanity_arrow_response(arrow_table_from_result_table(response.primary_results[0]))
+
     @aio_documented_by(KustoClientTestsSync.test_partial_results)
     @pytest.mark.asyncio
     async def test_partial_results(self):
