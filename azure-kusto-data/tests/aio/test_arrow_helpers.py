@@ -150,6 +150,13 @@ class TestAsyncArrow:
             await arrow_tables_from_streaming_response([])
 
     @pytest.mark.asyncio
+    async def test_sync_and_async_streaming_responses_are_not_interchangeable(self):
+        from azure.kusto.data.arrow_helpers import arrow_tables_from_response
+
+        with pytest.raises(TypeError, match="arrow_tables_from_streaming_response"):
+            arrow_tables_from_response(streaming_response(two_primary_tables(1)))
+
+    @pytest.mark.asyncio
     async def test_sync_and_async_streaming_tables_are_not_interchangeable(self):
         first = await streaming_response(two_primary_tables(1)).iter_primary_results().__anext__()
         with pytest.raises(TypeError, match="azure.kusto.data.aio.arrow_helpers"):

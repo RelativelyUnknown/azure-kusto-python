@@ -138,7 +138,8 @@ _CANONICAL_TYPES = {
 }
 
 _TICKS_PER_SECOND = 10_000_000
-_MAX_NS_TICKS = (2**63 - 1) // 100  # The largest number of ticks which fits in 64 bits when converted to nanoseconds
+_MAX_INT64 = 2**63 - 1
+_MAX_NS_TICKS = _MAX_INT64 // 100  # The largest number of ticks which fits in 64 bits when converted to nanoseconds
 _EPOCH_ORDINAL = 719163  # datetime.date(1970, 1, 1).toordinal()
 
 # Kusto datetimes are always UTC, and are formatted as 2014-01-01T01:01:01.0000001Z (the fraction is optional)
@@ -255,6 +256,8 @@ def _timespan_to_nanoseconds(value: Any) -> int:
 def _timespan_to_microseconds(value: Any) -> int:
     ticks = _timespan_to_ticks(value)
     microseconds = abs(ticks) // 10  # Truncated towards zero
+    if microseconds > _MAX_INT64:
+        raise OverflowError("out of the range of a microsecond resolution duration")
     return -microseconds if ticks < 0 else microseconds
 
 
@@ -715,6 +718,8 @@ def arrow_tables_from_response(
         tables: Iterable[Any] = response.primary_results if primary_only else response.tables
     elif isinstance(response, KustoStreamingResponseDataSet):
         tables = response.iter_primary_results() if primary_only else response
+    elif hasattr(response, "__aiter__"):
+        raise TypeError("Asynchronous streaming responses are converted with azure.kusto.data.aio.arrow_helpers.arrow_tables_from_streaming_response")
     else:
         raise TypeError("Expected KustoResponseDataSet or KustoStreamingResponseDataSet got {}".format(type(response).__name__))
 

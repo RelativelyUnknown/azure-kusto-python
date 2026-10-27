@@ -460,6 +460,13 @@ class TestTimespan:
         with pytest.raises(ValueError, match="nanosecond"):
             convert("timespan", [value], errors="raise")
 
+    def test_absurd_numbers(self):
+        absurd = [10**30, -(10**30), 1e30, float("inf")]
+        for unit, five_ticks in (("ns", 500), ("us", 0)):
+            assert as_ints(convert("timespan", absurd + [5], time_unit=unit)) == [None, None, None, None, five_ticks]
+        with pytest.raises(ValueError, match="microsecond"):
+            convert("timespan", [10**30], time_unit="us", errors="raise")
+
     def test_boundaries(self):
         limit = (2**63 - 1) // 100
         assert as_ints(convert("timespan", [limit, -limit, limit + 1])) == [limit * 100, -limit * 100, None]
