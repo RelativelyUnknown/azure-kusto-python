@@ -71,6 +71,35 @@ that it lives in the ``azure.kusto.data.aio`` namespace, and it returns
             for row in response.primary_results[0]:
                 print(row[0], " ", row["EventType"])
 
+Arrow
+~~~~~
+Query results can be converted to `Apache Arrow <https://arrow.apache.org/docs/python/>`_ tables and record batches, with all of Kusto's
+data types. To use it, install the package with the "pyarrow" extra:
+
+.. code:: bash
+
+    pip install azure-kusto-data[pyarrow]
+
+.. code:: python
+
+    from azure.kusto.data.arrow_helpers import arrow_table_from_result_table, arrow_reader_from_result_table, arrow_tables_from_response
+
+    response = client.execute(db, "StormEvents | take 10")
+    table = arrow_table_from_result_table(response.primary_results[0])  # A pyarrow.Table
+    tables = arrow_tables_from_response(response)  # A list with a pyarrow.Table for each primary result
+
+    # A streaming query is converted batch by batch, without reading the entire result to memory
+    streaming_response = client.execute_streaming_query(db, "StormEvents")
+    reader = arrow_reader_from_result_table(next(streaming_response.iter_primary_results()))  # A pyarrow.RecordBatchReader
+
+Kusto's datetime and timespan have a resolution of 100 nanoseconds and cover the years 0001-9999. By default they are converted to Arrow's
+nanoseconds resolution, which preserves every tick, but covers only the years 1677-2262: a datetime outside of this range, like
+``datetime(9999-12-31)``, is converted to null. Use ``time_unit="us"`` to convert them to microseconds, which covers the entire range
+but drops the last digit of the fraction of a second. See the documentation of ``azure.kusto.data.arrow_helpers`` for the type mapping
+and the other options.
+
+Streaming results of the async client are converted with ``azure.kusto.data.aio.arrow_helpers``.
+
 Links
 ~~~~~
 

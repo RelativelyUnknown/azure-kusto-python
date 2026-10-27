@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Optional `pyarrow` extra (`pip install azure-kusto-data[pyarrow]` and `azure-kusto-ingest[pyarrow]`).
+- `azure.kusto.data.arrow_helpers`, to convert query and control command results to Apache Arrow: `arrow_table_from_result_table`, `arrow_tables_from_response`,
+  `arrow_record_batches_from_result_table`, `arrow_reader_from_result_table` and `arrow_schema_from_result_table`. All of Kusto's data types are supported,
+  and streaming results are converted batch by batch.
+  - Kusto's `datetime` and `timespan` are converted to Arrow's nanosecond resolution by default, which preserves every tick of 100 nanoseconds but can't represent
+    datetimes outside of the years 1677-2262, like `datetime(9999-12-31)`: those are converted to nulls. Pass `time_unit="us"` to cover the entire range.
+- `azure.kusto.data.aio.arrow_helpers`, to convert the streaming results of the async client to Arrow.
+- `ingest_from_arrow`, to ingest Arrow tables, record batches, record batch readers and other Arrow streams, as Parquet.
+
 ## [6.0.4] - 2026-05-06
 
 ### Changed

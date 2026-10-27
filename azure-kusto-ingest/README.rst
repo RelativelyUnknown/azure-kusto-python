@@ -26,6 +26,25 @@ It is Python 3.x compatible and supports data types through familiar Python DB A
 It's possible to use the library, for instance, from `Jupyter Notebooks <http://jupyter.org/>`_ which are attached to Spark clusters,
 including, but not exclusively, `Azure Databricks <https://azure.microsoft.com/en-us/services/databricks>`_ instances.
 
+Arrow
+~~~~~
+Arrow data (a ``pyarrow.Table``, ``RecordBatch`` or ``RecordBatchReader``, or any object that implements the Arrow PyCapsule stream interface)
+can be ingested as well, after installing the package with the "pyarrow" extra (``pip install azure-kusto-ingest[pyarrow]``).
+It is written to a Parquet file, so the ingestion properties may have the Parquet format:
+
+.. code-block:: python
+
+    import pyarrow
+
+    table = pyarrow.table({"id": [1, 2], "name": ["abc", "cde"]})
+    ingestion_props = IngestionProperties(database="{database_name}", table="{table_name}", data_format=DataFormat.PARQUET)
+    client.ingest_from_arrow(table, ingestion_properties=ingestion_props)
+
+Kusto can't ingest a timespan from a Parquet file, so ``duration`` columns are rejected.
+
+Links
+~~~~~
+
 * `How to install the package <https://github.com/Azure/azure-kusto-python#install>`_.
 
 * `Data ingest sample <https://github.com/Azure/azure-kusto-python/blob/master/azure-kusto-ingest/tests/sample.py>`_.

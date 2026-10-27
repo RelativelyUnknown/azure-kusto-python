@@ -29,7 +29,10 @@ Download a zip of the code via GitHub or PyPi. Then follow the same instructions
 * [_Pandas_](http://pandas.pydata.org/) - Package provides extra functionality for use with pandas. Since these are optional dependencies, install with pandas:
     * `pip install azure-kusto-data[pandas]`
     * `pip install azure-kusto-ingest[pandas]`
-* [_aio_](http://pandas.pydata.org/) - Package provides async interfaces.
+* [_PyArrow_](https://arrow.apache.org/docs/python/) - Package provides the results of queries as Arrow tables and record batches, and ingestion of Arrow data. Since these are optional dependencies, install with pyarrow:
+    * `pip install azure-kusto-data[pyarrow]`
+    * `pip install azure-kusto-ingest[pyarrow]`
+* [_aio_](https://docs.aiohttp.org/) - Package provides async interfaces.
     * `pip install azure-kusto-data[aio]`
     * `pip install azure-kusto-ingest[aio]`
 
