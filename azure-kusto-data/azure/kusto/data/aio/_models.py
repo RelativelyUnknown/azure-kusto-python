@@ -1,4 +1,4 @@
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, List
 
 from azure.kusto.data._models import KustoResultRow, BaseStreamingKustoResultTable
 
@@ -17,3 +17,13 @@ class KustoStreamingResultTable(BaseStreamingKustoResultTable):
 
     def __aiter__(self) -> AsyncIterator[KustoResultRow]:
         return self
+
+    async def _aiter_raw_rows(self) -> AsyncIterator[List[Any]]:
+        """
+        Iterates over the raw (unconverted) rows, while keeping `row_count` and `finished` up to date,
+        so that the response data set can advance to the next table once this one is exhausted.
+        """
+        async for row in self.raw_rows:
+            self.row_count += 1
+            yield row
+        self.finished = True

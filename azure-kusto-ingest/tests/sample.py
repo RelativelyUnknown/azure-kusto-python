@@ -113,6 +113,13 @@ df = pandas.DataFrame(data=rows, columns=fields)
 
 client.ingest_from_dataframe(df, ingestion_properties=ingestion_props)
 
+# ingest from arrow data (requires the pyarrow extra). It is ingested as Parquet
+import pyarrow
+
+arrow_table = pyarrow.table({"id": [1, 2], "name": ["abc", "cde"], "value": [15.3, 99.9]})
+parquet_ingestion_props = IngestionProperties(database="{database_name}", table="{table_name}", data_format=DataFormat.PARQUET)
+client.ingest_from_arrow(arrow_table, ingestion_properties=parquet_ingestion_props)
+
 # ingest a whole folder.
 import os
 
@@ -186,6 +193,13 @@ rows = [[1, "abc", 15.3], [2, "cde", 99.9]]
 df = pandas.DataFrame(data=rows, columns=fields)
 
 client.ingest_from_dataframe(df, ingestion_properties=ingestion_properties)
+
+# ingest from arrow data (requires the pyarrow extra). It is ingested as Parquet
+import pyarrow
+
+arrow_table = pyarrow.table({"id": [1, 2], "name": ["abc", "cde"], "value": [15.3, 99.9]})
+parquet_ingestion_properties = IngestionProperties(database="{database_name}", table="{table_name}", data_format=DataFormat.PARQUET)
+client.ingest_from_arrow(arrow_table, ingestion_properties=parquet_ingestion_properties)
 
 # ingest from stream
 byte_sequence = b"56,56,56"

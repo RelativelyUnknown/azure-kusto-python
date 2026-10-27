@@ -60,6 +60,44 @@ class TestKustoClient(KustoClientTestsMixin):
             self._assert_sanity_data_frame_response(data_frame)
 
     @patch("requests.Session.post", side_effect=mocked_requests_post)
+    def test_sanity_arrow(self, mock_post, method):
+        """Tests KustoResponse to pyarrow.Table."""
+        pytest.importorskip("pyarrow")
+        from azure.kusto.data.arrow_helpers import arrow_table_from_result_table
+
+        with KustoClient(self.HOST) as client:
+            response = method.__call__(client, "PythonTest", "Deft")
+            table = arrow_table_from_result_table(get_response_first_primary_result(response))
+            self._assert_sanity_arrow_response(table)
+
+    @patch("requests.Session.post", side_effect=mocked_requests_post)
+    def test_arrow_control_command(self, mock_post):
+        """Tests the response of a control command, which reports the .NET names of the types, to pyarrow.Table."""
+        pytest.importorskip("pyarrow")
+        import pyarrow
+        from azure.kusto.data.arrow_helpers import arrow_tables_from_response
+
+        with KustoClient(self.HOST) as client:
+            tables = arrow_tables_from_response(client.execute_mgmt("NetDefaultDB", ".show version"))
+            assert len(tables) == 1
+            assert tables[0].schema.field("BuildTime").type == pyarrow.timestamp("us", "UTC")
+            assert tables[0].column("BuildVersion").to_pylist() == ["1.0.6693.14577"]
+
+    @patch("requests.Session.post", side_effect=mocked_requests_post)
+    def test_arrow_all_tables_of_streaming_response(self, mock_post):
+        """Tests that all of the tables of a streaming response can be read one after the other."""
+        pytest.importorskip("pyarrow")
+        from azure.kusto.data.arrow_helpers import arrow_tables_from_response
+
+        with KustoClient(self.HOST) as client:
+            response = client.execute_streaming_query("PythonTest", "Deft")
+            tables = arrow_tables_from_response(response, primary_only=False)
+            assert [table.schema.metadata[b"kusto.table_kind"] for table in tables] == [b"QueryProperties", b"PrimaryResult", b"QueryCompletionInformation"]
+            self._assert_sanity_arrow_response(tables[1])
+            assert response.finished
+            assert response.errors_count == 0
+
+    @patch("requests.Session.post", side_effect=mocked_requests_post)
     def test_pandas_bool(self, mock_post):
         """Tests KustoResponse to pandas.DataFrame."""
         with KustoClient(self.HOST) as client:

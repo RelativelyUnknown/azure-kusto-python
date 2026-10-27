@@ -296,6 +296,115 @@ class TestE2E:
             row = await primary_result["Rows"].__anext__()
             assert len(row) == len(primary_result["Columns"])
 
+    # Arrow
+
+    ARROW_ALL_TYPES_QUERY = (
+        "print b=true, i=int(5), l=long(5000000000), r=real(1.5), d=decimal(1.25), s='text', g=guid(6f3c1072-2739-461c-8aa7-3cfc8ff528a8), "
+        "dt=datetime(2021-12-22T11:43:00.1234567Z), ts=timespan(1.02:03:04.5), dyn=dynamic({'a':[1,2]}), "
+        "nb=bool(null), ni=int(null), nl=long(null), nr=real(null), nd=decimal(null), ng=guid(null), ndt=datetime(null), nts=timespan(null), ndyn=dynamic(null), "
+        "max_dt=datetime(9999-12-31T23:59:59.9999999Z), min_dt=datetime(0001-01-01), nan=real(nan), inf=real(+inf), ninf=real(-inf)"
+    )
+
+    @staticmethod
+    def _assert_arrow_all_types(table, time_unit="us"):
+        import pyarrow as pa
+
+        assert table.num_rows == 1
+        timestamp, duration = pa.timestamp(time_unit, "UTC"), pa.duration(time_unit)
+        expected_types = {"b": pa.bool_(), "i": pa.int32(), "l": pa.int64(), "r": pa.float64(), "d": pa.float64(), "s": pa.string(), "g": pa.string()}
+        expected_types.update({"dt": timestamp, "ts": duration, "dyn": pa.string(), "max_dt": timestamp, "min_dt": timestamp})
+        expected_types.update({"nan": pa.float64(), "inf": pa.float64(), "ninf": pa.float64()})
+        for name in ("b", "i", "l", "r", "d", "g", "dt", "ts", "dyn"):
+            expected_types["n" + name] = expected_types[name]
+        assert {field.name: field.type for field in table.schema} == expected_types
+
+        row = {name: table.column(name).to_pylist()[0] for name in ("b", "i", "l", "r", "d", "s", "g", "dyn", "nan", "inf", "ninf")}
+        assert row == {
+            "b": True,
+            "i": 5,
+            "l": 5000000000,
+            "r": 1.5,
+            "d": 1.25,
+            "s": "text",
+            "g": "6f3c1072-2739-461c-8aa7-3cfc8ff528a8",
+            "dyn": '{"a":[1,2]}',
+            "nan": row["nan"],
+            "inf": float("inf"),
+            "ninf": float("-inf"),
+        }
+        assert row["nan"] != row["nan"]
+        for name in ("nb", "ni", "nl", "nr", "nd", "ng", "ndt", "nts", "ndyn"):
+            assert table.column(name).null_count == 1, name
+
+        as_int = lambda name: table.column(name).cast(pa.int64()).to_pylist()[0]
+        dt_nanoseconds = 1640173380 * 10**9 + 123456700  # 2021-12-22T11:43:00.1234567Z
+        ts_nanoseconds = 93784500000000  # 1.02:03:04.5
+        if time_unit == "ns":
+            assert (as_int("dt"), as_int("ts")) == (dt_nanoseconds, ts_nanoseconds)
+            # The earliest and the latest datetimes of Kusto don't fit in nanoseconds
+            assert table.column("max_dt").null_count == 1 and table.column("min_dt").null_count == 1
+        else:
+            assert (as_int("dt"), as_int("ts")) == (dt_nanoseconds // 1000, ts_nanoseconds // 1000)
+            assert as_int("max_dt") == 253402300799 * 10**6 + 999999
+            assert as_int("min_dt") == -62135596800 * 10**6
+
+    def test_arrow_all_types(self):
+        pytest.importorskip("pyarrow")
+        from azure.kusto.data.arrow_helpers import arrow_table_from_result_table
+
+        with self.get_client() as client:
+            response = client.execute_query(self.test_db, self.ARROW_ALL_TYPES_QUERY)
+            self._assert_arrow_all_types(arrow_table_from_result_table(response.primary_results[0]))
+            self._assert_arrow_all_types(arrow_table_from_result_table(response.primary_results[0], time_unit="ns"), "ns")
+
+    def test_arrow_streaming(self):
+        pytest.importorskip("pyarrow")
+        from azure.kusto.data.arrow_helpers import arrow_reader_from_result_table, arrow_table_from_result_table
+
+        with self.get_client() as client:
+            result = client.execute_streaming_query(self.test_db, self.streaming_test_table_query)
+            reader = arrow_reader_from_result_table(next(result.iter_primary_results()), batch_size=100)
+            streamed = reader.read_all()
+            assert next(result.iter_primary_results(), None) is None
+            assert result.errors_count == 0
+
+            not_streamed = arrow_table_from_result_table(client.execute_query(self.test_db, self.streaming_test_table_query).primary_results[0])
+            assert streamed.equals(not_streamed)
+            assert streamed.num_rows == len(self.test_streaming_data)
+            assert streamed.schema.field("AvgTicketPrice").metadata == {b"kusto.type": b"real"}
+
+    @pytest.mark.asyncio
+    async def test_arrow_async(self):
+        pytest.importorskip("pyarrow")
+        from azure.kusto.data.aio.arrow_helpers import arrow_record_batches_from_streaming_result_table, arrow_table_from_streaming_result_table
+        from azure.kusto.data.arrow_helpers import arrow_table_from_result_table
+
+        async with await self.get_async_client() as client:
+            response = await client.execute_query(self.test_db, self.ARROW_ALL_TYPES_QUERY)
+            self._assert_arrow_all_types(arrow_table_from_result_table(response.primary_results[0]))
+
+            expected = arrow_table_from_result_table((await client.execute_query(self.test_db, self.streaming_test_table_query)).primary_results[0])
+
+            result = await client.execute_streaming_query(self.test_db, self.streaming_test_table_query)
+            streamed = await arrow_table_from_streaming_result_table(await result.iter_primary_results().__anext__(), batch_size=100)
+            assert streamed.equals(expected)
+
+            result = await client.execute_streaming_query(self.test_db, self.streaming_test_table_query)
+            batches = [
+                batch async for batch in arrow_record_batches_from_streaming_result_table(await result.iter_primary_results().__anext__(), batch_size=100)
+            ]
+            assert sum(batch.num_rows for batch in batches) == len(self.test_streaming_data)
+
+    def test_arrow_control_command(self):
+        pytest.importorskip("pyarrow")
+        from azure.kusto.data.arrow_helpers import arrow_tables_from_response
+
+        with self.get_client() as client:
+            tables = arrow_tables_from_response(client.execute_mgmt(self.test_db, ".show version"))
+            assert len(tables) == 1
+            assert tables[0].num_rows == 1
+            assert "BuildVersion" in tables[0].schema.names
+
     def test_log_analytics_query(self):
         if not self.ai_engine_cs:
             pytest.skip("No application insights connection string provided")

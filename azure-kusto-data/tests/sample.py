@@ -114,6 +114,16 @@ dataframe = dataframe_from_result_table(response.primary_results[0])
 
 print(dataframe)
 
+# and Arrow tables (requires the pyarrow extra)
+from azure.kusto.data.arrow_helpers import arrow_reader_from_result_table, arrow_table_from_result_table
+
+arrow_table = arrow_table_from_result_table(response.primary_results[0])
+print(arrow_table)
+
+# Kusto's datetime and timespan are converted with a resolution of microseconds by default, like most data tools expect.
+# To keep every tick of 100 nanoseconds use time_unit="ns", which only covers the years 1677-2262 (and can't be read from Parquet by Spark or Databricks)
+arrow_table = arrow_table_from_result_table(response.primary_results[0], time_unit="ns")
+
 # Streaming Query - rather than reading everything ahead, iterate through results as they come
 multiple_tables = 'StormEvents | where EventType == "Heavy Rain" | take 10; StormEvents | where EventType == "Tornado" | take 10'
 
@@ -145,6 +155,12 @@ next(results, None)  # Tables are finished
 
 # When we finish all the tables we get None
 print(results.tables)  # Access all tables, not just the primary results
+
+# A streaming table can be converted to Arrow batch by batch, without reading all of it to memory
+results = client.execute_streaming_query("DB", multiple_tables)
+reader = arrow_reader_from_result_table(next(results.iter_primary_results()), batch_size=10_000)
+for batch in reader:
+    print(batch.num_rows)
 
 ##################
 ### EXCEPTIONS ###

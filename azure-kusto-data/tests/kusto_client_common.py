@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from io import BytesIO
-from typing import Optional, Any, Dict, Union, Iterator
+from typing import Optional, Any, Dict, Union, Iterator, TYPE_CHECKING
 
 from dateutil.tz import UTC
 from requests import HTTPError
@@ -15,6 +15,9 @@ from azure.kusto.data.response import WellKnownDataSet, KustoStreamingResponseDa
 
 from pandas import DataFrame, Series, to_datetime
 from pandas.testing import assert_frame_equal
+
+if TYPE_CHECKING:
+    import pyarrow
 
 
 def mocked_requests_post(*args, **kwargs):
@@ -375,6 +378,56 @@ class KustoClientTestsMixin:
         ]
         expected_data_frame = DataFrame(expected_dict, columns=columns, copy=True)
         assert_frame_equal(data_frame, expected_data_frame)
+
+    @staticmethod
+    def _assert_sanity_arrow_response(table: "pyarrow.Table", time_unit: str = "us"):
+        import calendar
+        import json
+
+        import pyarrow as pa
+
+        def to_unit(ticks: int) -> int:
+            """Converts ticks of 100 nanoseconds to the resolution of the table, truncating towards zero (all of the datetimes here are positive)"""
+            if time_unit == "ns":
+                return ticks * 100
+            return abs(ticks) // 10 * (-1 if ticks < 0 else 1)
+
+        def utc_time(year: int, ticks: int) -> int:
+            return to_unit(calendar.timegm((year, 1, 1, 1, 1, 1, 0, 0, 0)) * 10**7 + ticks)
+
+        def time_span(i: int) -> int:
+            if i == 0:
+                return 0
+            ticks = (i * 24 * 3600 + i) * 10**7 + i * 10001
+            return to_unit(ticks if i % 2 == 1 else -ticks)
+
+        numbers = range(10)
+        # The first row of the query is a row of nulls (empty strings), the others are numbered
+        expected_arrays = {
+            "rownumber": pa.array([None, *numbers], type=pa.int32()),
+            "rowguid": pa.array([""] + ["0000000{0}-0000-0000-0001-020304050607".format(i) for i in numbers], type=pa.string()),
+            "xdouble": pa.array([None] + [float("{0}.{0:04d}".format(i)) for i in numbers], type=pa.float64()),
+            "xfloat": pa.array([None] + [float("{0}.{0:02d}".format(i)) for i in numbers], type=pa.float64()),
+            "xbool": pa.array([None] + [i % 2 == 1 for i in numbers], type=pa.bool_()),
+            "xint16": pa.array([None, *numbers], type=pa.int32()),
+            "xint32": pa.array([None, *numbers], type=pa.int32()),
+            "xint64": pa.array([None, *numbers], type=pa.int64()),
+            "xuint8": pa.array([None, *numbers], type=pa.int64()),
+            "xuint16": pa.array([None, *numbers], type=pa.int64()),
+            "xuint32": pa.array([None, *numbers], type=pa.int64()),
+            "xuint64": pa.array([None, *numbers], type=pa.int64()),
+            "xdate": pa.array([None] + [utc_time(2014 + i, i) for i in numbers], type=pa.int64()).cast(pa.timestamp(time_unit, "UTC")),
+            "xsmalltext": pa.array([""] + DIGIT_WORDS[:10], type=pa.string()),
+            "xtext": pa.array([""] + DIGIT_WORDS[:10], type=pa.string()),
+            "xnumberAsText": pa.array([""] + [str(i) for i in numbers], type=pa.string()),
+            "xtime": pa.array([None] + [time_span(i) for i in numbers], type=pa.int64()).cast(pa.duration(time_unit)),
+            "xtextWithNulls": pa.array([""] * 11, type=pa.string()),
+            "xdynamicWithNulls": pa.array(["", ""] + [json.dumps({"rowId": i, "arr": [0, i]}, separators=(",", ":")) for i in range(1, 10)], type=pa.string()),
+        }
+        assert table.column_names == list(expected_arrays)
+        for name, expected in expected_arrays.items():
+            assert table.schema.field(name).type == expected.type, name
+            assert table.column(name).equals(pa.chunked_array([expected])), name
 
     @staticmethod
     def _assert_partial_results_response(response: SyncResponseSet):

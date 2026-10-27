@@ -1,3 +1,4 @@
+import copy
 import gzip
 import ipaddress
 import os
@@ -7,7 +8,7 @@ import uuid
 from abc import ABCMeta, abstractmethod
 from enum import Enum
 from io import TextIOWrapper
-from typing import TYPE_CHECKING, Union, IO, AnyStr, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Union, IO, AnyStr, Optional, Tuple, Dict
 from urllib.parse import urlparse
 
 from azure.kusto.data.data_format import DataFormat, IngestionMappingKind
@@ -17,6 +18,7 @@ from .ingestion_properties import IngestionProperties
 
 if TYPE_CHECKING:
     import pandas
+    import pyarrow
 
 INGEST_PREFIX = "ingest-"
 PROTOCOL_SUFFIX = "://"
@@ -146,6 +148,72 @@ class BaseIngestClient(metaclass=ABCMeta):
             return self.ingest_from_file(temp_file_path, ingestion_properties)
         finally:
             os.unlink(temp_file_path)
+
+    def ingest_from_arrow(
+        self,
+        data: "Union[pyarrow.Table, pyarrow.RecordBatch, pyarrow.RecordBatchReader, Any]",
+        ingestion_properties: IngestionProperties,
+        *,
+        compression: str = "snappy",
+        row_group_size: Optional[int] = None,
+        parquet_options: Optional[Dict[str, Any]] = None,
+    ) -> IngestionResult:
+        """Ingest Arrow data. The data is written to a Parquet file, which is ingested like any other file.
+        To learn more about ingestion methods go to:
+        https://docs.microsoft.com/en-us/azure/data-explorer/ingest-data-overview#ingestion-methods
+
+        The columns are matched to the columns of the table by name, unless a mapping is given. The Arrow types are converted by Kusto:
+        a timestamp to a datetime, an integer to an int or a long, a floating point number to a real, a decimal to a decimal,
+        a string to a string, a nested type (a list, struct or map) to a dynamic and a uuid to a guid, which requires pyarrow 21 or later.
+        Kusto can't ingest a timespan from a Parquet file, so durations are rejected, and so is the null type.
+        A string is not converted to a guid, a datetime or a timespan.
+
+        Timestamps are written with microsecond resolution, which every Parquet reader understands (Spark, Databricks and Fabric can't
+        read nanoseconds). A timestamp with nanoseconds is therefore truncated to microseconds. Pass `parquet_options` to change that,
+        for instance `{"coerce_timestamps": None}` writes nanoseconds as they are, which only helps if the reader of the file accepts them.
+        To ingest every tick of 100 nanoseconds of a datetime, cast the column to int64 nanoseconds since the epoch and add a Parquet mapping which
+        converts it, `ColumnMapping(column_name="ts", column_type="datetime", path="$.ts", transform=TransformationMethod.DATE_TIME_FROM_UNIX_NANOSECONDS)`,
+        to properties created with `data_format=DataFormat.PARQUET`. The mapping is required: an integer column which reaches a datetime column
+        through the default mapping (by column name) is ingested as empty or wrong data. Streaming ingestion doesn't accept a mapping that is
+        part of the request, so with the streaming and managed streaming clients create the mapping beforehand and pass its name as
+        `ingestion_mapping_reference`.
+
+        A RecordBatchReader (or any other stream) is written batch by batch, so it doesn't have to fit in memory.
+        The data is written to a temporary file, which is deleted after the ingestion.
+
+        :param data: The data to ingest. Either a pyarrow Table, RecordBatch or RecordBatchReader, or any object which implements
+            the Arrow PyCapsule stream interface (`__arrow_c_stream__`), like the dataframes of polars.
+        :param azure.kusto.ingest.IngestionProperties ingestion_properties: Ingestion properties. The format is always set to Parquet (in
+            a copy of the properties, the given object is not modified), so a mapping has to be a Parquet mapping, which is the case if the
+            properties were created with `data_format=DataFormat.PARQUET`.
+        :param compression: The compression codec of the Parquet file, "snappy" by default. Could be "none", "snappy", "gzip", "brotli",
+            "lz4" or "zstd".
+        :param row_group_size: The maximal number of rows in each row group of the Parquet file.
+        :param parquet_options: Additional options for `pyarrow.parquet.ParquetWriter`, which take precedence over the defaults
+            (`coerce_timestamps="us"` and `allow_truncated_timestamps=True`), for instance `{"coerce_timestamps": "ms"}`.
+        """
+
+        if self._is_closed:
+            raise KustoClosedError()
+
+        # A mapping which is not a Parquet mapping would be sent to the service together with the Parquet format
+        if ingestion_properties.ingestion_mapping_type not in (None, IngestionMappingKind.PARQUET):
+            raise ValueError(
+                "Arrow data is ingested as Parquet, but the ingestion mapping is a {} mapping. Create the IngestionProperties with data_format=DataFormat.PARQUET".format(
+                    ingestion_properties.ingestion_mapping_type.value
+                )
+            )
+
+        from ._arrow_ingest import write_parquet
+
+        file_path = write_parquet(data, compression, row_group_size, parquet_options)
+
+        parquet_properties = copy.copy(ingestion_properties)
+        parquet_properties.format = DataFormat.PARQUET
+        try:
+            return self.ingest_from_file(file_path, parquet_properties)
+        finally:
+            os.unlink(file_path)
 
     @staticmethod
     def _prepare_stream(stream_descriptor: Union[StreamDescriptor, IO[AnyStr]], ingestion_properties: IngestionProperties) -> StreamDescriptor:

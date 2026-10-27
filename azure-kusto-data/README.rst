@@ -71,6 +71,47 @@ that it lives in the ``azure.kusto.data.aio`` namespace, and it returns
             for row in response.primary_results[0]:
                 print(row[0], " ", row["EventType"])
 
+Arrow
+~~~~~
+Query results can be converted to `Apache Arrow <https://arrow.apache.org/docs/python/>`_ tables and record batches, with all of Kusto's
+data types. To use it, install the package with the "pyarrow" extra:
+
+.. code:: bash
+
+    pip install azure-kusto-data[pyarrow]
+
+.. code:: python
+
+    from azure.kusto.data.arrow_helpers import arrow_table_from_result_table, arrow_reader_from_result_table, arrow_tables_from_response
+
+    response = client.execute(db, "StormEvents | take 10")
+    table = arrow_table_from_result_table(response.primary_results[0])  # A pyarrow.Table
+    tables = arrow_tables_from_response(response)  # A list with a pyarrow.Table for each primary result
+
+    # A streaming query is converted batch by batch, without reading the entire result to memory
+    streaming_response = client.execute_streaming_query(db, "StormEvents")
+    reader = arrow_reader_from_result_table(next(streaming_response.iter_primary_results()))  # A pyarrow.RecordBatchReader
+
+Kusto stores a datetime as a count of ticks of 100 nanoseconds and covers the years 0001-9999 (a timespan is counted in ticks as well).
+By default they are converted to Arrow's microsecond resolution, like most data tools expect (Python, PyArrow, pandas 3, Polars, DuckDB,
+Spark, Databricks, Delta and BigQuery). That covers the entire range, but drops the last digit of the fraction of a second.
+Use ``time_unit="ns"`` to keep every tick. Arrow's nanoseconds only cover the years 1677-2262, so a datetime outside of this range, like
+``datetime(9999-12-31)``, is converted to null, and Spark, Databricks and Fabric cannot read Parquet files with nanosecond timestamps.
+See the documentation of ``azure.kusto.data.arrow_helpers`` for the type mapping and the other options.
+
+Streaming results of the async client are converted with ``azure.kusto.data.aio.arrow_helpers``.
+
+The default was checked with pyarrow 26 against pandas 2.3.1 and 3.0.5, Polars 2.1.0, DuckDB 2.0.0 and PySpark 4.2.0 (local mode):
+
+* pandas: ``table.to_pandas()`` gives ``datetime64[us, UTC]`` and ``timedelta64[us]``, with the years 0001 and 9999 intact. With ``time_unit="ns"`` the
+  columns are ``datetime64[ns, UTC]`` and ``timedelta64[ns]``, and a datetime outside of 1677-2262 is ``NaT``.
+* Polars: ``polars.from_arrow(table)`` gives ``Datetime("us", "UTC")`` and ``Duration("us")``, and the nanosecond variants for ``time_unit="ns"``.
+* DuckDB: microseconds become ``TIMESTAMP WITH TIME ZONE`` and nanoseconds ``TIMESTAMPTZ_NS``, which keeps the seventh digit. A timespan becomes an
+  ``INTERVAL``, which has microsecond resolution either way.
+* Spark: a Parquet file with microsecond timestamps is read as ``timestamp`` with the whole range intact (``0001-01-01`` to ``9999-12-31``). A file
+  with nanosecond timestamps, which is what ``pyarrow.parquet.write_table`` writes for ``time_unit="ns"``, fails with ``PARQUET_TYPE_ILLEGAL``.
+  Collecting ``0001-01-01`` into a Python ``datetime`` failed there with ``year 0 is out of range``, while ``cast(dt as string)`` shows it correctly.
+
 Links
 ~~~~~
 

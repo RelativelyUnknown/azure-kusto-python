@@ -616,6 +616,84 @@ class TestE2E:
             await self.drop_table(table)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("client_name", ["ingest_client", "streaming_ingest_client", "managed_streaming_ingest_client"])
+    async def test_ingest_from_arrow(self, client_name):
+        pa = pytest.importorskip("pyarrow")
+        from datetime import datetime, timezone
+
+        from azure.kusto.data.arrow_helpers import arrow_table_from_result_table
+
+        table = await self.init_table("ingest_from_arrow_" + client_name)
+        try:
+            guid = str(uuid.uuid4())
+            dynamic_value = ["me@dummy.com", "you@dummy.com"]
+            data = pa.table(
+                {
+                    "rownumber": pa.array([0, 1], pa.int32()),
+                    "rowguid": pa.array([guid, None], pa.string()),
+                    "xdouble": pa.array([1.5, None], pa.float64()),
+                    "xbool": pa.array([True, False], pa.bool_()),
+                    "xint64": pa.array([2**40, None], pa.int64()),
+                    "xdate": pa.array([datetime(2021, 12, 22, 11, 43, 1, tzinfo=timezone.utc), None], pa.timestamp("us", "UTC")),
+                    "xtext": pa.array(["text", None], pa.string()),
+                    "xdynamicWithNulls": pa.array([dynamic_value, None], pa.list_(pa.string())),
+                }
+            )
+            ingestion_properties = IngestionProperties(database=self.test_db, table=table, data_format=DataFormat.PARQUET, flush_immediately=True)
+            getattr(self, client_name).ingest_from_arrow(data, ingestion_properties)
+
+            await self.assert_rows_added(table, 2, timeout=120)
+
+            response = self.client.execute(self.test_db, f"{table} | order by rownumber asc")
+            actual = arrow_table_from_result_table(response.primary_results[0], time_unit="us")
+            assert actual.column("rownumber").to_pylist() == [0, 1]
+            assert actual.column("rowguid").to_pylist()[0] == guid
+            assert actual.column("xdouble").to_pylist() == [1.5, None]
+            assert actual.column("xbool").to_pylist() == [True, False]
+            assert actual.column("xint64").to_pylist() == [2**40, None]
+            assert actual.column("xdate").to_pylist()[0] == datetime(2021, 12, 22, 11, 43, 1, tzinfo=timezone.utc)
+            assert actual.column("xtext").to_pylist()[0] == "text"
+            assert actual.column("xdynamicWithNulls").to_pylist()[0] == '["me@dummy.com","you@dummy.com"]'
+        finally:
+            await self.drop_table(table)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("client_name", ["ingest_client", "streaming_ingest_client", "managed_streaming_ingest_client"])
+    async def test_ingest_from_arrow_round_trip(self, client_name):
+        """Query results converted to Arrow are ingested to a table with the same types (other than timespan, which Parquet can't carry)"""
+        pa = pytest.importorskip("pyarrow")
+        if int(pa.__version__.split(".")[0]) < 21:
+            pytest.skip("pyarrow 21 is the first to write the Parquet UUID type, which Kusto ingests to a guid")
+
+        from azure.kusto.data.arrow_helpers import arrow_table_from_result_table
+
+        options = dict(time_unit="us", decimal_as="decimal128", decimal_scale=6, guid_as="uuid")
+        query = (
+            "print b=true, i=int(5), l=long(5000000000), r=real(1.5), d=decimal(1.25), s='text', g=guid(6f3c1072-2739-461c-8aa7-3cfc8ff528a8), "
+            "dt=datetime(2021-12-22T11:43:00.123456Z), dyn=dynamic({'a':[1,2]}), ni=int(null), ng=guid(null), ndt=datetime(null)"
+        )
+        table = f"{self.test_table}_arrow_round_trip_{client_name}_{int(time.time())}_{random.randint(1, 100000)}"
+        async with await self.get_async_client() as async_client:
+            await async_client.execute(
+                self.test_db,
+                f".create table {table} (b: bool, i: int, l: long, r: real, d: decimal, s: string, g: guid, dt: datetime, dyn: dynamic, ni: int, ng: guid, ndt: datetime)",
+            )
+            await async_client.execute(self.test_db, f".alter table {table} policy streamingingestion enable ")
+            await async_client.execute(self.test_db, ".clear database cache streamingingestion schema")
+        try:
+            source = arrow_table_from_result_table(self.client.execute(self.test_db, query).primary_results[0], **options)
+            ingestion_properties = IngestionProperties(database=self.test_db, table=table, data_format=DataFormat.PARQUET, flush_immediately=True)
+            getattr(self, client_name).ingest_from_arrow(source, ingestion_properties)
+
+            await self.assert_rows_added(table, 1, timeout=120)
+
+            ingested = arrow_table_from_result_table(self.client.execute(self.test_db, table).primary_results[0], **options)
+            assert ingested.schema.equals(source.schema)
+            assert ingested.equals(source)
+        finally:
+            await self.drop_table(table)
+
+    @pytest.mark.asyncio
     async def test_streaming_ingest_from_blob(self, is_managed_streaming):
         table = await self.init_table("streaming_ingest_from_blob" + ("_managed" if is_managed_streaming else ""))
         try:

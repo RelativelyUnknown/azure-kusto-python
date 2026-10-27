@@ -150,6 +150,54 @@ class TestKustoStreamingIngestClient:
         assert result.status == IngestionStatus.SUCCESS
 
     @responses.activate
+    def test_streaming_ingest_from_arrow(self, ingest_client_class):
+        pa = pytest.importorskip("pyarrow")
+        pq = pytest.importorskip("pyarrow.parquet")
+
+        bodies = []
+
+        def callback(request):
+            bodies.append(request.body)
+            assert request.url.endswith("/v1/rest/ingest/database/table?streamFormat=parquet")
+            return request_callback(request, ingest_client_class)
+
+        responses.add_callback(responses.POST, "https://somecluster.kusto.windows.net/v1/rest/ingest/database/table", callback=callback)
+
+        ingest_client = ingest_client_class("https://somecluster.kusto.windows.net")
+        ingestion_properties = IngestionProperties(database="database", table="table", data_format=DataFormat.CSV)
+
+        table = pa.table({"id": pa.array([1, 2], pa.int64()), "name": pa.array(["abc", "cde"]), "value": pa.array([15.3, 99.9])})
+
+        result = ingest_client.ingest_from_arrow(table, ingestion_properties)
+        assert result.status == IngestionStatus.SUCCESS
+        assert pq.read_table(io.BytesIO(bodies[0])).equals(table)
+
+    @responses.activate
+    def test_streaming_ingest_from_arrow_with_a_mapping_reference(self, ingest_client_class):
+        pa = pytest.importorskip("pyarrow")
+        pq = pytest.importorskip("pyarrow.parquet")
+
+        requests = []
+
+        def callback(request):
+            requests.append(request)
+            return request_callback(request, ingest_client_class)
+
+        responses.add_callback(responses.POST, "https://somecluster.kusto.windows.net/v1/rest/ingest/database/table", callback=callback)
+
+        # Streaming ingestion can't take an inline mapping, so a mapping which was created before is referenced
+        ingestion_properties = IngestionProperties(
+            database="database", table="table", data_format=DataFormat.PARQUET, ingestion_mapping_reference="NanosecondsMapping"
+        )
+        table = pa.table({"when": pa.array([1_700_000_000_123_456_700], pa.int64())})
+
+        ingest_client = ingest_client_class("https://somecluster.kusto.windows.net")
+        result = ingest_client.ingest_from_arrow(table, ingestion_properties)
+        assert result.status == IngestionStatus.SUCCESS
+        assert requests[0].url.endswith("/v1/rest/ingest/database/table?streamFormat=parquet&mappingName=NanosecondsMapping")
+        assert pq.read_table(io.BytesIO(requests[0].body)).equals(table)
+
+    @responses.activate
     def test_streaming_ingest_from_stream(self, ingest_client_class):
         responses.add_callback(
             responses.POST, "https://somecluster.kusto.windows.net/v1/rest/ingest/database/table", callback=lambda r: request_callback(r, ingest_client_class)
