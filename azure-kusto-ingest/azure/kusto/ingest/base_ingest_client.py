@@ -168,6 +168,16 @@ class BaseIngestClient(metaclass=ABCMeta):
         Kusto can't ingest a timespan from a Parquet file, so durations are rejected, and so is the null type.
         A string is not converted to a guid, a datetime or a timespan.
 
+        Timestamps are written with microsecond resolution, which every Parquet reader understands (Spark, Databricks and Fabric can't
+        read nanoseconds). A timestamp with nanoseconds is therefore truncated to microseconds. Pass `parquet_options` to change that,
+        for instance `{"coerce_timestamps": None}` writes nanoseconds as they are, which only helps if the reader of the file accepts them.
+        To ingest every tick of 100 nanoseconds of a datetime, cast the column to int64 nanoseconds since the epoch and add a Parquet mapping which
+        converts it, `ColumnMapping(column_name="ts", column_type="datetime", path="$.ts", transform=TransformationMethod.DATE_TIME_FROM_UNIX_NANOSECONDS)`,
+        to properties created with `data_format=DataFormat.PARQUET`. The mapping is required: an integer column which reaches a datetime column
+        through the default mapping (by column name) is ingested as empty or wrong data. Streaming ingestion doesn't accept a mapping that is
+        part of the request, so with the streaming and managed streaming clients create the mapping beforehand and pass its name as
+        `ingestion_mapping_reference`.
+
         A RecordBatchReader (or any other stream) is written batch by batch, so it doesn't have to fit in memory.
         The data is written to a temporary file, which is deleted after the ingestion.
 
@@ -179,8 +189,8 @@ class BaseIngestClient(metaclass=ABCMeta):
         :param compression: The compression codec of the Parquet file, "snappy" by default. Could be "none", "snappy", "gzip", "brotli",
             "lz4" or "zstd".
         :param row_group_size: The maximal number of rows in each row group of the Parquet file.
-        :param parquet_options: Additional options for `pyarrow.parquet.ParquetWriter`, for instance
-            `{"coerce_timestamps": "us", "allow_truncated_timestamps": True}` to write timestamps with microsecond resolution.
+        :param parquet_options: Additional options for `pyarrow.parquet.ParquetWriter`, which take precedence over the defaults
+            (`coerce_timestamps="us"` and `allow_truncated_timestamps=True`), for instance `{"coerce_timestamps": "ms"}`.
         """
 
         if self._is_closed:

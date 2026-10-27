@@ -78,7 +78,9 @@ def write_parquet(data: Any, compression: str, row_group_size: Optional[int], pa
 
     file_name = "arrow_{id}_{timestamp}_{uid}.parquet".format(id=id(data), timestamp=int(time.time()), uid=uuid.uuid4())
     file_path = os.path.join(tempfile.gettempdir(), file_name)
-    options: Dict[str, Any] = {"compression": compression}
+    # Timestamps are written with microseconds, the resolution that every Parquet reader supports (Spark, Databricks and Fabric can't read nanoseconds),
+    # and which is also the default of other tools that write Parquet, like dlt. The user can override all of it.
+    options: Dict[str, Any] = {"compression": compression, "coerce_timestamps": "us", "allow_truncated_timestamps": True}
     options.update(parquet_options or {})
     try:
         with pq.ParquetWriter(file_path, schema, **options) as writer:

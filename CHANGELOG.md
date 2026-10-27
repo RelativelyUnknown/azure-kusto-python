@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Spark, Databricks and Fabric can't read Parquet files with nanosecond timestamps.
 - `azure.kusto.data.aio.arrow_helpers`, to convert the streaming results of the async client to Arrow.
 - `ingest_from_arrow`, to ingest Arrow tables, record batches, record batch readers and other Arrow streams, as Parquet.
+  - Timestamps are written with microsecond resolution (a `timestamp[ns]` column is truncated), as Spark, Databricks and Fabric can't read nanosecond timestamps in Parquet.
+    Pass `parquet_options={"coerce_timestamps": None}` to write them as they are. To keep every tick of 100 nanoseconds, ingest the column as integer nanoseconds
+    with a Parquet mapping that uses the `DateTimeFromUnixNanoseconds` transformation (see the README).
 
 ## [6.0.4] - 2026-05-06
 

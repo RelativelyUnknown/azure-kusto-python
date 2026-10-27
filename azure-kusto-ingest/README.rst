@@ -42,6 +42,30 @@ It is written to a Parquet file, so the ingestion properties may have the Parque
 
 Kusto can't ingest a timespan from a Parquet file, so ``duration`` columns are rejected.
 
+Timestamps are written with microsecond resolution, which every Parquet reader supports (Spark, Databricks and Fabric can't read nanosecond timestamps).
+A ``timestamp[ns]`` column is truncated to microseconds, so the last digit of a Kusto datetime's fraction of a second is dropped.
+To write the nanoseconds as they are, pass ``parquet_options={"coerce_timestamps": None}``, if the cluster accepts them.
+
+To keep every 100 nanosecond tick of a datetime, ingest the column as integer nanoseconds and let the mapping convert it. The queued client takes the mapping
+inline; the streaming and managed streaming clients need a mapping which was created in advance, passed as ``ingestion_mapping_reference``:
+
+.. code-block:: python
+
+    table = pyarrow.table({"id": [1], "when": pyarrow.array([1_700_000_000_123_456_700], pyarrow.timestamp("ns", "UTC"))})
+    table = table.set_column(1, "when", table.column("when").cast(pyarrow.int64()))  # nanoseconds since 1970
+    ingestion_props = IngestionProperties(
+        database="{database_name}",
+        table="{table_name}",
+        data_format=DataFormat.PARQUET,
+        column_mappings=[
+            ColumnMapping(column_name="id", column_type="long", path="$.id"),
+            ColumnMapping(column_name="when", column_type="datetime", path="$.when", transform=TransformationMethod.DATE_TIME_FROM_UNIX_NANOSECONDS),
+        ],
+    )
+    client.ingest_from_arrow(table, ingestion_properties=ingestion_props)
+
+Without the mapping, an integer column that is ingested to a datetime column gives empty or wrong values.
+
 Links
 ~~~~~
 

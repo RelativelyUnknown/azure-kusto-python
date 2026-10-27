@@ -135,7 +135,7 @@ class TestIngestFromArrow:
     def test_types_survive_the_round_trip(self, client, properties):
         table = pa.table(
             {
-                "nanoseconds": pa.array([1, None], pa.timestamp("ns", "UTC")),
+                "microseconds": pa.array([1, None], pa.timestamp("us", "UTC")),
                 "decimal": pa.array([Decimal("1.5"), None], pa.decimal128(38, 18)),
                 "text": pa.array(["a", None]),
                 "number": pa.array([1, None], pa.int32()),
@@ -143,12 +143,49 @@ class TestIngestFromArrow:
             }
         )
         client.ingest_from_arrow(table, properties)
-        assert client.last["table"].schema.field("nanoseconds").type == pa.timestamp("ns", "UTC")
+        assert client.last["table"].schema.field("microseconds").type == pa.timestamp("us", "UTC")
         assert client.last["table"].equals(table)
 
-    def test_timestamp_resolution_can_be_coerced(self, client, properties):
+    def test_nanoseconds_are_truncated_to_microseconds_by_default(self, client, properties):
+        table = pa.table({"when": pa.array([1_000_000_123, None], pa.timestamp("ns", "UTC"))})
+        client.ingest_from_arrow(table, properties)
+        written = client.last["table"]
+        assert written.schema.field("when").type == pa.timestamp("us", "UTC")
+        assert written.column("when").cast(pa.int64()).to_pylist() == [1_000_000, None]
+        assert table.schema.field("when").type == pa.timestamp("ns", "UTC")  # The given table is untouched
+
+    def test_other_resolutions_are_written_as_microseconds(self, client, properties):
+        table = pa.table({"ms": pa.array([1000], pa.timestamp("ms", "UTC")), "s": pa.array([1], pa.timestamp("s")), "naive": pa.array([1], pa.timestamp("ns"))})
+        client.ingest_from_arrow(table, properties)
+        assert [field.type for field in client.last["table"].schema] == [pa.timestamp("us", "UTC"), pa.timestamp("us"), pa.timestamp("us")]
+        assert client.last["table"].column("ms").cast(pa.int64()).to_pylist() == [1_000_000]
+
+    def test_nested_timestamps_are_coerced_too(self, client, properties):
+        table = pa.table(
+            {
+                "in_list": pa.array([[1_000_000_123]], pa.list_(pa.timestamp("ns", "UTC"))),
+                "in_struct": pa.array([{"t": 1_000_000_123}], pa.struct([("t", pa.timestamp("ns", "UTC"))])),
+            }
+        )
+        client.ingest_from_arrow(table, properties)
+        assert client.last["table"].schema.field("in_list").type == pa.list_(pa.timestamp("us", "UTC"))
+        assert client.last["table"].schema.field("in_struct").type == pa.struct([("t", pa.timestamp("us", "UTC"))])
+
+    def test_nanoseconds_can_be_written_as_they_are(self, client, properties):
         table = pa.table({"when": pa.array([1_000_000_123], pa.timestamp("ns", "UTC"))})
-        client.ingest_from_arrow(table, properties, parquet_options={"coerce_timestamps": "us", "allow_truncated_timestamps": True})
+        client.ingest_from_arrow(table, properties, parquet_options={"coerce_timestamps": None})
+        assert client.last["table"].schema.field("when").type == pa.timestamp("ns", "UTC")
+        assert client.last["table"].column("when").cast(pa.int64()).to_pylist() == [1_000_000_123]
+
+    def test_other_resolution_can_be_requested(self, client, properties):
+        table = pa.table({"when": pa.array([1_234_567_000], pa.timestamp("ns", "UTC"))})
+        client.ingest_from_arrow(table, properties, parquet_options={"coerce_timestamps": "ms"})
+        assert client.last["table"].schema.field("when").type == pa.timestamp("ms", "UTC")
+        assert client.last["table"].column("when").cast(pa.int64()).to_pylist() == [1_234]
+
+    def test_the_older_parquet_version_works_with_the_defaults(self, client, properties):
+        table = pa.table({"when": pa.array([1_000_000_123], pa.timestamp("ns", "UTC")), "n": pa.array([1], pa.uint32())})
+        client.ingest_from_arrow(table, properties, parquet_options={"version": "2.4"})
         assert client.last["table"].schema.field("when").type == pa.timestamp("us", "UTC")
 
     def test_uuid(self, client, properties):
