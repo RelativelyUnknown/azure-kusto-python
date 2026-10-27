@@ -101,6 +101,17 @@ See the documentation of ``azure.kusto.data.arrow_helpers`` for the type mapping
 
 Streaming results of the async client are converted with ``azure.kusto.data.aio.arrow_helpers``.
 
+The default was checked with pyarrow 26 against pandas 2.3.1 and 3.0.5, Polars 2.1.0, DuckDB 2.0.0 and PySpark 4.2.0 (local mode):
+
+* pandas: ``table.to_pandas()`` gives ``datetime64[us, UTC]`` and ``timedelta64[us]``, with the years 0001 and 9999 intact. With ``time_unit="ns"`` the
+  columns are ``datetime64[ns, UTC]`` and ``timedelta64[ns]``, and a datetime outside of 1677-2262 is ``NaT``.
+* Polars: ``polars.from_arrow(table)`` gives ``Datetime("us", "UTC")`` and ``Duration("us")``, and the nanosecond variants for ``time_unit="ns"``.
+* DuckDB: microseconds become ``TIMESTAMP WITH TIME ZONE`` and nanoseconds ``TIMESTAMPTZ_NS``, which keeps the seventh digit. A timespan becomes an
+  ``INTERVAL``, which has microsecond resolution either way.
+* Spark: a Parquet file with microsecond timestamps is read as ``timestamp`` with the whole range intact (``0001-01-01`` to ``9999-12-31``). A file
+  with nanosecond timestamps, which is what ``pyarrow.parquet.write_table`` writes for ``time_unit="ns"``, fails with ``PARQUET_TYPE_ILLEGAL``.
+  Collecting ``0001-01-01`` into a Python ``datetime`` failed there with ``year 0 is out of range``, while ``cast(dt as string)`` shows it correctly.
+
 Links
 ~~~~~
 
