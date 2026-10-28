@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Pass `parquet_options={"coerce_timestamps": None}` to write them as they are. To keep every tick of 100 nanoseconds, ingest the column as integer nanoseconds
     with a Parquet mapping that uses the `DateTimeFromUnixNanoseconds` transformation (see the README).
 
+### Changed
+- The READMEs of `azure-kusto-data` and `azure-kusto-ingest` are Markdown files, and follow the Azure SDK README template: getting started, key concepts, examples, troubleshooting, next steps, and contributing sections.
+- The authentication section of the main README no longer describes ADAL, and its broken links are fixed.
+
+### Fixed
+- The managed streaming ingestion sample used a constructor that doesn't exist. It uses `ManagedStreamingIngestClient(engine_kcsb, dm_kcsb)` now.
+
 ## [6.0.4] - 2026-05-06
 
 ### Changed
