@@ -36,6 +36,18 @@ dynamic                string                          compact JSON text
 Every field keeps its Kusto type in its metadata (`kusto.type`). The schema keeps the name, ID, and kind of the table
 (`kusto.table_name`, `kusto.table_id`, and `kusto.table_kind`).
 
+Using the results with other tools. The output was checked with pyarrow 26, pandas 2.3.1 and 3.0.5, Polars 2.1.0, DuckDB 2.0.0,
+and PySpark 4.2.0 (local mode):
+
+* pandas: `to_pandas()` gives `datetime64[us, UTC]` and `timedelta64[us]`, with the years 0001 and 9999 intact. With `time_unit="ns"`,
+  it gives `datetime64[ns, UTC]` and `timedelta64[ns]`, and a datetime outside 1677-2262 is `NaT`.
+* Polars: `polars.from_arrow(table)` gives `Datetime("us", "UTC")` and `Duration("us")`, and the nanosecond variants for `time_unit="ns"`.
+* DuckDB: microseconds become `TIMESTAMP WITH TIME ZONE`, and nanoseconds become `TIMESTAMPTZ_NS`, which keeps the seventh digit.
+  A timespan becomes an `INTERVAL`, which has microsecond resolution either way.
+* Spark: a Parquet file with microsecond timestamps is read as `timestamp`, from `0001-01-01` to `9999-12-31`. A file with nanosecond
+  timestamps fails with `PARQUET_TYPE_ILLEGAL`. In PySpark, collecting `0001-01-01` into a Python `datetime` failed with
+  `year 0 is out of range`. Cast the column to a string to see the value.
+
 Options shared by the conversion functions:
 
 :param time_unit: The resolution of the Arrow `timestamp` and `duration` types, `"us"` or `"ns"`. Defaults to `"us"`.
