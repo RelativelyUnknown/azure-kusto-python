@@ -26,29 +26,50 @@ Overview
 
 
 
-*Kusto Python Client* Library provides the capability to query Kusto clusters using Python.
-It is Python 3.x compatible and supports
-all data types through familiar Python DB API interface.
+*Kusto Python Client* is a library for querying Kusto clusters from Python.
+It supports all of Kusto's data types, and results can be read row by row, much like a DB API cursor.
 
-It's possible to use the library, for instance, from `Jupyter Notebooks
-<http://jupyter.org/>`_.
-which are attached to Spark clusters,
-including, but not exclusively, `Azure Databricks
-<https://azure.microsoft.com/en-us/services/databricks/>`_. instances.
+It also works well from `Jupyter Notebooks <http://jupyter.org/>`_, including ones attached to Spark clusters, for instance on
+`Azure Databricks <https://azure.microsoft.com/en-us/services/databricks/>`_.
+
+Queries and control commands
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``client.execute`` runs a query, or a control command if the text starts with a dot (``.show tables``). If you want to be explicit, use
+``execute_query`` or ``execute_mgmt``. The ``database`` argument may be ``None`` when the connection string names an "Initial Catalog".
+
+Results are available as ``response.primary_results``, a list of tables you can iterate over. To pass options such as a timeout or query parameters,
+use ``ClientRequestProperties``.
+
+Pandas
+~~~~~~
+With the "pandas" extra (``pip install azure-kusto-data[pandas]``) a result table becomes a ``DataFrame``:
+
+.. code:: python
+
+    from azure.kusto.data.helpers import dataframe_from_result_table
+
+    df = dataframe_from_result_table(response.primary_results[0])
+
+Streaming queries
+~~~~~~~~~~~~~~~~~
+For results that are too big to hold in memory, ``execute_streaming_query`` returns the tables one at a time and the rows as you read them:
+
+.. code:: python
+
+    streaming_response = client.execute_streaming_query(db, "StormEvents")
+    for table in streaming_response.iter_primary_results():
+        for row in table:
+            print(row["EventType"])
 
 Async Client
 ~~~~~~~~~~~~
-Kusto now provides an asynchronous client for queries.
-
-To use the client, first install the package with the "aio" extra:
+There is also an asynchronous client, in the ``azure.kusto.data.aio`` namespace. Install the package with the "aio" extra:
 
 .. code:: bash
 
     pip install azure-kusto-data[aio]
 
-The async client uses exact same interface as the regular client, except
-that it lives in the ``azure.kusto.data.aio`` namespace, and it returns
-``Futures`` you will need to ``await`` its
+It has the same interface as the regular client, except that its methods are coroutines, so you ``await`` them:
 
 .. code:: python
 
@@ -73,44 +94,25 @@ that it lives in the ``azure.kusto.data.aio`` namespace, and it returns
 
 Arrow
 ~~~~~
-Query results can be converted to `Apache Arrow <https://arrow.apache.org/docs/python/>`_ tables and record batches, with all of Kusto's
-data types. To use it, install the package with the "pyarrow" extra:
-
-.. code:: bash
-
-    pip install azure-kusto-data[pyarrow]
+Results can also be converted to `Apache Arrow <https://arrow.apache.org/docs/python/>`_ tables and record batches. Install the package with the
+"pyarrow" extra (``pip install azure-kusto-data[pyarrow]``):
 
 .. code:: python
 
-    from azure.kusto.data.arrow_helpers import arrow_table_from_result_table, arrow_reader_from_result_table, arrow_tables_from_response
+    from azure.kusto.data.arrow_helpers import arrow_table_from_result_table, arrow_reader_from_result_table
 
-    response = client.execute(db, "StormEvents | take 10")
     table = arrow_table_from_result_table(response.primary_results[0])  # A pyarrow.Table
-    tables = arrow_tables_from_response(response)  # A list with a pyarrow.Table for each primary result
 
-    # A streaming query is converted batch by batch, without reading the entire result to memory
+    # A streaming query is converted batch by batch, without reading the whole result into memory
     streaming_response = client.execute_streaming_query(db, "StormEvents")
     reader = arrow_reader_from_result_table(next(streaming_response.iter_primary_results()))  # A pyarrow.RecordBatchReader
 
-Kusto stores a datetime as a count of ticks of 100 nanoseconds and covers the years 0001-9999 (a timespan is counted in ticks as well).
-By default they are converted to Arrow's microsecond resolution, like most data tools expect (Python, PyArrow, pandas 3, Polars, DuckDB,
-Spark, Databricks, Delta and BigQuery). That covers the entire range, but drops the last digit of the fraction of a second.
-Use ``time_unit="ns"`` to keep every tick. Arrow's nanoseconds only cover the years 1677-2262, so a datetime outside of this range, like
-``datetime(9999-12-31)``, is converted to null, and Spark, Databricks and Fabric cannot read Parquet files with nanosecond timestamps.
-See the documentation of ``azure.kusto.data.arrow_helpers`` for the type mapping and the other options.
-
 Streaming results of the async client are converted with ``azure.kusto.data.aio.arrow_helpers``.
 
-The default was checked with pyarrow 26 against pandas 2.3.1 and 3.0.5, Polars 2.1.0, DuckDB 2.0.0 and PySpark 4.2.0 (local mode):
-
-* pandas: ``table.to_pandas()`` gives ``datetime64[us, UTC]`` and ``timedelta64[us]``, with the years 0001 and 9999 intact. With ``time_unit="ns"`` the
-  columns are ``datetime64[ns, UTC]`` and ``timedelta64[ns]``, and a datetime outside of 1677-2262 is ``NaT``.
-* Polars: ``polars.from_arrow(table)`` gives ``Datetime("us", "UTC")`` and ``Duration("us")``, and the nanosecond variants for ``time_unit="ns"``.
-* DuckDB: microseconds become ``TIMESTAMP WITH TIME ZONE`` and nanoseconds ``TIMESTAMPTZ_NS``, which keeps the seventh digit. A timespan becomes an
-  ``INTERVAL``, which has microsecond resolution either way.
-* Spark: a Parquet file with microsecond timestamps is read as ``timestamp`` with the whole range intact (``0001-01-01`` to ``9999-12-31``). A file
-  with nanosecond timestamps, which is what ``pyarrow.parquet.write_table`` writes for ``time_unit="ns"``, fails with ``PARQUET_TYPE_ILLEGAL``.
-  Collecting ``0001-01-01`` into a Python ``datetime`` failed there with ``year 0 is out of range``, while ``cast(dt as string)`` shows it correctly.
+By default, Kusto's ``datetime`` and ``timespan`` values become Arrow timestamps and durations with microsecond resolution. That covers every Kusto
+datetime (years 0001-9999) and is what most tools expect, but it drops the last digit (100 ns) of the fraction of a second. Pass ``time_unit="ns"`` to
+keep it; Arrow's nanoseconds only cover the years 1677-2262, so anything outside that range becomes null.
+See the documentation of ``azure.kusto.data.arrow_helpers`` for the type mapping and the other options.
 
 Links
 ~~~~~
