@@ -370,3 +370,16 @@ class TestKustoConnectionStringBuilder:
         with pytest.raises(KeyError) as e:
             KustoConnectionStringBuilder("Data Source=localhost;Initial Catalog=NetDefaultDB;Bla=Test")
         assert "Unknown keyword: `Bla`" in str(e.value)
+
+    def test_trailing_and_empty_segments_are_ignored(self):
+        for connection_string in ["https://c.kusto.windows.net;", "Data Source=https://c.kusto.windows.net;;Initial Catalog=db;"]:
+            kcsb = KustoConnectionStringBuilder(connection_string)
+            assert kcsb.data_source == "https://c.kusto.windows.net"
+
+    def test_quoted_values(self):
+        kcsb = KustoConnectionStringBuilder(
+            'https://c.kusto.windows.net;AAD Federated Security=True;Application Client Id="abc";Application Key=\'k;1=2\';Initial Catalog="my db"'
+        )
+        assert kcsb.application_client_id == "abc"
+        assert kcsb.application_key == "k;1=2"
+        assert kcsb.initial_catalog == "my db"

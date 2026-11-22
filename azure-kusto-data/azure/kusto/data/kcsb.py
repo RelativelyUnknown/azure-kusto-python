@@ -112,6 +112,30 @@ class Keyword:
 Keyword.init_lookup()
 
 
+def _split_unquoted(text: str, separator: str) -> List[str]:
+    """Splits on the separator, except where it is inside a single or double quoted value."""
+    parts, current, quote = [], [], None
+    for char in text:
+        if quote:
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char == separator:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
+def _unquote(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
 class KustoConnectionStringBuilder:
     """
     Parses Kusto connection strings.
@@ -157,11 +181,13 @@ class KustoConnectionStringBuilder:
 
         self[SupportedKeywords.AUTHORITY_ID] = "organizations"
 
-        for kvp_string in connection_string.split(";"):
+        for kvp_string in _split_unquoted(connection_string, ";"):
+            if not kvp_string.strip():
+                continue
             key, _, value = kvp_string.partition("=")
             keyword = Keyword.parse(key)
 
-            value_stripped = value.strip()
+            value_stripped = _unquote(value.strip())
             if keyword.is_str_type():
                 if keyword.name == SupportedKeywords.DATA_SOURCE:
                     self[keyword.name] = value_stripped.rstrip("/")
