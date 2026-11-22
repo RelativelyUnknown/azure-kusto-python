@@ -183,7 +183,7 @@ class KustoClient(_KustoClientBase):
             headers=request_headers,
             json=request.json_payload,
             data=request.payload,
-            timeout=timeout.seconds,
+            timeout=timeout.total_seconds(),
             proxy=self._proxy_url,
             allow_redirects=False,
         )
