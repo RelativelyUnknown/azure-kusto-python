@@ -302,6 +302,7 @@ class KustoClient(_KustoClientBase):
         :param azure.kusto.data.ClientRequestProperties properties: Optional additional properties.
         :return KustoStreamingResponseDataSet:
         """
+        database = self._get_database_or_default(database)
         Span.set_query_attributes(self._kusto_cluster, database, properties)
 
         return KustoStreamingResponseDataSet(self._execute_streaming_query_parsed(database, query, timeout, properties))
@@ -328,7 +329,7 @@ class KustoClient(_KustoClientBase):
             headers=request_headers,
             json=request.json_payload,
             data=request.payload,
-            timeout=request.timeout.seconds,
+            timeout=request.timeout.total_seconds(),
             stream=stream_response,
             allow_redirects=False,
         )
@@ -340,19 +341,22 @@ class KustoClient(_KustoClientBase):
         except Exception as e:
             raise KustoNetworkError(endpoint, None if properties is None else properties.client_request_id) from e
 
+        if 300 <= response.status_code < 400:
+            raise KustoServiceError(f"Unexpected redirection, got status code: {response.status_code}", response)
+
         if stream_response:
             try:
                 response.raise_for_status()
-                if 300 <= response.status_code < 400:
-                    raise Exception("Unexpected redirection, got status code: " + str(response.status))
                 return response
             except Exception as e:
-                raise self._handle_http_error(e, self._query_endpoint, None, response, response.status_code, response.json(), response.text)
+                try:
+                    response_json = response.json()
+                except ValueError:
+                    response_json = None
+                raise self._handle_http_error(e, self._query_endpoint, None, response, response.status_code, response_json, response.text)
 
         response_json = None
         try:
-            if 300 <= response.status_code < 400:
-                raise Exception("Unexpected redirection, got status code: " + str(response.status))
             if response.text:
                 response_json = response.json()
             else:

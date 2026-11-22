@@ -160,6 +160,8 @@ class QueuedIngestClient(BaseIngestClient):
                 if retries_left == 0:
                     raise KustoQueueError() from e
 
+        raise KustoQueueError()
+
     def _get_containers(self) -> List[_ResourceUri]:
         return self._resource_manager.get_containers()
 
@@ -187,6 +189,9 @@ class QueuedIngestClient(BaseIngestClient):
         """
         blob_name = "{db}__{table}__{guid}__{file}".format(db=database, table=table, guid=descriptor.source_id, file=descriptor.stream_name)
 
+        if not containers:
+            raise KustoBlobError(ValueError("The service returned no storage containers"))
+
         retries_left = min(max_retries, len(containers))
         for container in containers:
             try:
@@ -200,4 +205,4 @@ class QueuedIngestClient(BaseIngestClient):
                 # TODO: log the retry once we have a proper logging system
                 self._resource_manager.report_resource_usage_result(container.storage_account_name, False)
                 if retries_left == 0:
-                    raise KustoBlobError(e)
+                    raise KustoBlobError(e) from e
