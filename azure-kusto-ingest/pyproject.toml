@@ -12,7 +12,7 @@ dependencies = [
     "azure-storage-queue==12.13.0",
     "tenacity>=9.1.2",
 ]
-readme = "README.rst"
+readme = "README.md"
 requires-python = ">= 3.9"
 license = "MIT"
 keywords = ["azure", "kusto", "ingest", "data", "analytics"]

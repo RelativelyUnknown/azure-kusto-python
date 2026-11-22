@@ -8,14 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Optional `pyarrow` extra for both packages.
-- `azure.kusto.data.arrow_helpers` (and `azure.kusto.data.aio.arrow_helpers` for async streaming results), to convert query and control command results to Apache Arrow.
-  All of Kusto's data types are supported, and streaming results are converted batch by batch.
-  - `datetime` and `timespan` become microsecond-resolution Arrow values by default, which covers Kusto's whole range and is what most data tools expect.
-    Pass `time_unit="ns"` to keep every 100 ns tick (Arrow's nanoseconds only cover the years 1677-2262, anything else becomes null).
-- `ingest_from_arrow`, to ingest Arrow tables, record batches, readers and other Arrow streams as Parquet.
-  - Timestamps are written with microsecond resolution (a `timestamp[ns]` column is truncated), because Spark, Databricks and Fabric can't read nanosecond Parquet timestamps.
-    Pass `parquet_options={"coerce_timestamps": None}` to write them as they are, or ingest integer nanoseconds with a `DateTimeFromUnixNanoseconds` mapping to keep every tick.
+- Optional `pyarrow` extra (`pip install azure-kusto-data[pyarrow]` and `azure-kusto-ingest[pyarrow]`).
+- `azure.kusto.data.arrow_helpers`, to convert query and control command results to Apache Arrow: `arrow_table_from_result_table`, `arrow_tables_from_response`,
+  `arrow_record_batches_from_result_table`, `arrow_reader_from_result_table` and `arrow_schema_from_result_table`. All of Kusto's data types are supported,
+  and streaming results are converted batch by batch.
+  - Kusto's `datetime` and `timespan` are converted to Arrow's microsecond resolution by default, as most data tools expect (Python, PyArrow, pandas 3, Polars, DuckDB,
+    Spark, Azure Databricks, Delta Lake, and BigQuery). Microseconds cover the entire range of a datetime (the years 0001-9999) and drop the last digit of the fraction of a second.
+    Pass `time_unit="ns"` to keep every tick of 100 nanoseconds. Arrow nanoseconds only cover the years 1677-2262 (anything else is converted to null), and
+    Spark, Azure Databricks, and Microsoft Fabric can't read Parquet files with nanosecond timestamps.
+- `azure.kusto.data.aio.arrow_helpers`, to convert the streaming results of the async client to Arrow.
+- `ingest_from_arrow`, to ingest Arrow tables, record batches, record batch readers and other Arrow streams, as Parquet.
+  - Timestamps are written with microsecond resolution (a `timestamp[ns]` column is truncated), because Spark, Azure Databricks, and Microsoft Fabric can't read nanosecond timestamps in Parquet.
+    Pass `parquet_options={"coerce_timestamps": None}` to write them as they are. To keep every tick of 100 nanoseconds, ingest the column as integer nanoseconds
+    with a Parquet mapping that uses the `DateTimeFromUnixNanoseconds` transformation (see the README).
+
+### Changed
+- The READMEs of `azure-kusto-data` and `azure-kusto-ingest` are Markdown files, and follow the Azure SDK README template: getting started, key concepts, examples, troubleshooting, next steps, and contributing sections.
+- The authentication section of the main README no longer describes ADAL, and its broken links are fixed.
 
 ### Fixed
 - `execute_streaming_query` now uses the "Initial Catalog" of the connection string when no database is given.
@@ -27,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ingest_from_dataframe` no longer modifies the `IngestionProperties` you pass in, and removes its temporary file when writing the DataFrame fails.
 - `get_ingestion_endpoint` and `get_query_endpoint` look for the `ingest-` prefix at the start of the host name only (`bigingest-c.kusto.windows.net` is left alone), and `localhost` is recognized by the host name, so IPv6 addresses work and `mylocalhost-x...` is not reserved.
 - The managed streaming client traces the attempt number as a number, and the resource manager and the ingestion message no longer use the deprecated `datetime.utcnow()`.
+- The managed streaming ingestion sample used a constructor that doesn't exist. It uses `ManagedStreamingIngestClient(engine_kcsb, dm_kcsb)` now.
 
 ## [6.0.4] - 2026-05-06
 

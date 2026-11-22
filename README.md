@@ -28,30 +28,30 @@ git clone https://github.com/Azure/azure-kusto-python
 
 Both packages have the same optional extras. Install only what you use:
 
-| Extra     | Adds                                                                                  | Example                              |
-| --------- | ------------------------------------------------------------------------------------- | ------------------------------------ |
-| `pandas`  | Results as a `DataFrame`, and ingesting a `DataFrame`                                 | `pip install azure-kusto-data[pandas]`  |
-| `pyarrow` | Results as Arrow tables and record batches, and ingesting Arrow data                  | `pip install azure-kusto-data[pyarrow]` |
-| `aio`     | The asynchronous clients (`azure.kusto.data.aio`)                                     | `pip install azure-kusto-data[aio]`     |
+| Extra     | Adds                                                                 | Example                                 |
+| --------- | -------------------------------------------------------------------- | --------------------------------------- |
+| `pandas`  | Results as a `DataFrame`, and ingesting a `DataFrame`                | `pip install azure-kusto-data[pandas]`  |
+| `pyarrow` | Results as Arrow tables and record batches, and ingesting Arrow data | `pip install azure-kusto-data[pyarrow]` |
+| `aio`     | The asynchronous clients (`azure.kusto.data.aio`)                    | `pip install azure-kusto-data[aio]`     |
 
 ## Minimum requirements
 
 - Python 3.9 or later
 - The dependencies are listed in each package's `pyproject.toml`
 
-## Authentication
+## Authentication methods
 
-Use one of the `KustoConnectionStringBuilder.with_*` helpers to choose how to sign in. The most common are:
+The clients authenticate with Microsoft Entra ID (formerly Azure Active Directory), or with a token that you provide. Choose the method with the `KustoConnectionStringBuilder`:
 
-- **Application key or certificate**: an AAD application ID with a secret or a certificate.
-- **Interactive login** and **device code**: you sign in as yourself, in a browser or with a code.
-- **Azure CLI**: reuse the account you are already logged in with in [azure-cli](https://github.com/Azure/azure-cli).
-- **Managed identity**: for code running in Azure.
-- **Token or token provider**: bring your own token, or a callable that returns one.
-- **Username and password**: see the notice below.
+* Azure CLI - use the account that is signed in to the [Azure CLI](https://learn.microsoft.com/cli/azure/).
+* Interactive login or device code - sign in through a browser window, or with a code.
+* Microsoft Entra application - authenticate with an application ID and a secret, or with a certificate.
+* Managed identity - authenticate with the managed identity of an Azure resource.
+* Azure credential - use any `azure-identity` credential, such as `DefaultAzureCredential`.
+* User name and password - this doesn't work for accounts that require multi-factor authentication.
+* Token - provide your own token or token provider.
 
-> **Note:** Signing in with a username and password doesn't work for accounts that require multi-factor authentication, which is a limitation of the underlying
-> identity library. Prefer one of the other methods when you can.
+The [azure-kusto-data README](https://github.com/Azure/azure-kusto-python/tree/master/azure-kusto-data#authenticate-the-client) lists every method.
 
 ## Samples
 
@@ -61,20 +61,20 @@ Use one of the `KustoConnectionStringBuilder.with_*` helpers to choose how to si
 
 ## Best practices
 
-See the SDK [best practices guide](https://docs.microsoft.com/azure/data-explorer/kusto/api/netfx/kusto-ingest-best-practices). It was written for the .NET SDK, but most of it applies here too.
+See the SDK [best practices guide](https://learn.microsoft.com/kusto/api/netfx/kusto-ingest-best-practices). It was written for the .NET SDK, but most of it applies here too.
 
 ## Need help?
 
 - **Feature request?** Post it on [User Voice](https://feedback.azure.com/forums/915733-azure-data-explorer).
-- **Technical question?** Ask on [Stack Overflow with the tag "azure-data-explorer"](https://stackoverflow.com/questions/tagged/azure-data-explorer).
-- **Need support?** Every customer with an active Azure subscription can [open a support ticket](https://docs.microsoft.com/en-us/azure/azure-supportability/how-to-create-azure-support-request).
+- **Technical question?** Ask on [Microsoft Q&A](https://learn.microsoft.com/answers/topics/azure-data-explorer.html) or on [Stack Overflow with the tag "azure-data-explorer"](https://stackoverflow.com/questions/tagged/azure-data-explorer).
+- **Need support?** Every customer with an active Azure subscription can [open a support ticket](https://learn.microsoft.com/azure/azure-portal/supportability/how-to-create-azure-support-request).
 - **Found a bug?** Please [file an issue](https://github.com/Azure/azure-kusto-python/issues/new) with as much detail as you can.
 
 ## SDKs for other languages
 
 - [Node](https://github.com/azure/azure-kusto-node)
 - [Java](https://github.com/azure/azure-kusto-java)
-- [.NET](https://docs.microsoft.com/en-us/azure/kusto/api/netfx/about-the-sdk)
+- [.NET](https://learn.microsoft.com/kusto/api/netfx/about-the-sdk)
 - [Go](https://github.com/Azure/azure-kusto-go)
 
 ## Contribute

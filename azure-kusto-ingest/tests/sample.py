@@ -222,10 +222,9 @@ dm_cluster = "https://ingest-{cluster_name}.kusto.windows.net"
 
 kcsb = KustoConnectionStringBuilder.with_aad_application_key_authentication(dm_cluster, client_id, client_secret, authority_id)
 
-# Create it from a dm connection string
-client = ManagedStreamingIngestClient.from_dm_kcsb(kcsb)
-# or an engine connection string, like a streaming ingestion client with `from_engine_kcsb`
-# or provide both: `ManagedStreamingIngestClient(engine_kcsb, dm_kcsb)`
+# Create it from the connection string of the cluster. The engine and the ingestion endpoints are derived from it.
+client = ManagedStreamingIngestClient(kcsb)
+# or provide both the engine and the ingestion (data management) connection strings: `ManagedStreamingIngestClient(engine_kcsb, dm_kcsb)`
 
 # use client as you would a streaming or queued ingestion client
 

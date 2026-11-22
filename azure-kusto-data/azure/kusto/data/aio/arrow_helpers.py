@@ -1,21 +1,21 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License
 """
-Conversion of asynchronous streaming Kusto results into `Apache Arrow <https://arrow.apache.org/>`_ structures.
+Convert asynchronous streaming Kusto results to `Apache Arrow <https://arrow.apache.org/>`_ structures.
 
-This module requires the optional `pyarrow` and `aiohttp` dependencies: `pip install azure-kusto-data[pyarrow,aio]`.
+This module requires the optional `pyarrow` and `aiohttp` packages. Install them with `pip install azure-kusto-data[pyarrow,aio]`.
 
-The tables of a response of the asynchronous `KustoClient.execute_query` and `execute_mgmt` are ordinary `KustoResultTable`s, which are
-converted with the functions of `azure.kusto.data.arrow_helpers`. The tables of a response of `KustoClient.execute_streaming_query`
-are read from the network while they are iterated, and are converted here:
+The tables in a response of the asynchronous `KustoClient.execute_query` and `execute_mgmt` are ordinary `KustoResultTable` objects.
+Convert them with the functions of `azure.kusto.data.arrow_helpers`. The tables in a response of `KustoClient.execute_streaming_query`
+are read from the network while you iterate them. Convert them with these functions:
 
 * `arrow_table_from_streaming_result_table` - reads a streaming table and returns it as a `pyarrow.Table`.
-* `arrow_record_batches_from_streaming_result_table` - an asynchronous iterator of `pyarrow.RecordBatch`, which reads the table
-  batch by batch, without materializing it in memory.
-* `arrow_tables_from_streaming_response` - reads all (or only the primary) tables of a streaming response.
+* `arrow_record_batches_from_streaming_result_table` - returns an asynchronous iterator of `pyarrow.RecordBatch` that reads the table
+  batch by batch, without holding it in memory.
+* `arrow_tables_from_streaming_response` - reads all the tables of a streaming response, or only the primary ones.
 
-See `azure.kusto.data.arrow_helpers` for the type mapping and for the options, which are the same here.
-The conversion of each batch is done by the event loop's thread.
+See `azure.kusto.data.arrow_helpers` for the type mapping and the options, which are the same here.
+The thread of the event loop converts each batch.
 """
 
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
@@ -91,12 +91,18 @@ async def arrow_table_from_streaming_result_table(
     converters_by_type: Optional[Dict[str, ArrowConverter]] = None,
     converters_by_column_name: Optional[Dict[str, ArrowConverter]] = None,
 ) -> "pa.Table":
-    """Reads an asynchronous streaming Kusto result table entirely, and converts it into a pyarrow Table.
+    """Reads an asynchronous streaming Kusto result table entirely, and converts it to a pyarrow Table.
     The streaming table can't be read again.
     See `azure.kusto.data.arrow_helpers` for the options.
 
     :param table: Table received from the streaming response.
-    :param batch_size: The number of rows converted at once.
+    :param batch_size: The number of rows converted at once. Defaults to `DEFAULT_BATCH_SIZE` (65,536).
+    :raises TypeError: If `table` isn't a `KustoResultTable` or an asynchronous `KustoStreamingResultTable`, a converter is neither
+        an Arrow type nor a function, or a converter function doesn't return an Arrow array.
+    :raises ValueError: If `table` has no columns, `batch_size` is less than 1, an option has an invalid value, a column has a type that
+        Kusto doesn't have and no converter, a row has more values than the table has columns, or a value can't be converted
+        and `errors="raise"`.
+    :raises azure.kusto.data.exceptions.KustoMultiApiError: If the service reports an error while the table is read.
     :return: pyarrow Table.
     """
     _check_batch_size(batch_size)
@@ -120,12 +126,19 @@ def arrow_record_batches_from_streaming_result_table(
     converters_by_type: Optional[Dict[str, ArrowConverter]] = None,
     converters_by_column_name: Optional[Dict[str, ArrowConverter]] = None,
 ) -> AsyncIterator["pa.RecordBatch"]:
-    """Converts an asynchronous streaming Kusto result table into pyarrow RecordBatches, lazily: a batch is read from the network
-    only when it is requested, with `async for`. An empty table yields no batches.
+    """Converts an asynchronous streaming Kusto result table to pyarrow RecordBatches, lazily: a batch is read from the network
+    only when you request it with `async for`. An empty table yields no batches.
     See `azure.kusto.data.arrow_helpers` for the options.
 
     :param table: Table received from the streaming response.
-    :param batch_size: The (maximal) number of rows in each batch.
+    :param batch_size: The maximal number of rows in each batch. Defaults to `DEFAULT_BATCH_SIZE` (65,536).
+    :raises TypeError: If `table` isn't a `KustoResultTable` or an asynchronous `KustoStreamingResultTable`, or a converter is neither
+        an Arrow type nor a function. Raised when you call the function. While you iterate, also if a converter function doesn't
+        return an Arrow array.
+    :raises ValueError: If `table` has no columns, `batch_size` is less than 1, an option has an invalid value, or a column has a type that
+        Kusto doesn't have and no converter. Raised when you call the function. While you iterate, also if a row has more values than
+        the table has columns, or a value can't be converted and `errors="raise"`.
+    :raises azure.kusto.data.exceptions.KustoMultiApiError: While you iterate, if the service reports an error.
     :return: An asynchronous iterator of pyarrow RecordBatches.
     """
     _check_batch_size(batch_size)
@@ -149,13 +162,19 @@ async def arrow_tables_from_streaming_response(
     converters_by_type: Optional[Dict[str, ArrowConverter]] = None,
     converters_by_column_name: Optional[Dict[str, ArrowConverter]] = None,
 ) -> List["pa.Table"]:
-    """Reads the tables of an asynchronous streaming Kusto response one after the other, and converts them into pyarrow Tables.
+    """Reads the tables of an asynchronous streaming Kusto response one after the other, and converts them to pyarrow Tables.
     See `azure.kusto.data.arrow_helpers` for the options.
 
     :param response: The response of the asynchronous `KustoClient.execute_streaming_query`.
-    :param primary_only: When True (the default), only the primary result tables are converted. Otherwise, all of the tables are,
-        including the tables with information about the query.
-    :param batch_size: The number of rows converted at once.
+    :param primary_only: If True, converts only the primary result tables. Otherwise, converts all the tables, including the tables with
+        information about the query. Defaults to True.
+    :param batch_size: The number of rows converted at once. Defaults to `DEFAULT_BATCH_SIZE` (65,536).
+    :raises TypeError: If `response` isn't an asynchronous `KustoStreamingResponseDataSet`, or a converter is neither an Arrow type nor
+        a function.
+    :raises ValueError: If a table has no columns, `batch_size` is less than 1, an option has an invalid value, a column has a type that
+        Kusto doesn't have and no converter, a row has more values than the table has columns, or a value can't be converted
+        and `errors="raise"`.
+    :raises azure.kusto.data.exceptions.KustoMultiApiError: If the service reports an error while the response is read.
     :return: A list of pyarrow Tables.
     """
     if not isinstance(response, KustoStreamingResponseDataSet):

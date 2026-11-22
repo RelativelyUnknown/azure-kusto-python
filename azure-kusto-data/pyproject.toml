@@ -6,7 +6,7 @@ authors = [
     { name = "Microsoft Corporation", email = "kustalk@microsoft.com" },
 ]
 license = "MIT"
-readme = "README.rst"
+readme = "README.md"
 urls = { "Repository" = "https://github.com/Azure/azure-kusto-python" }
 
 dependencies = [
