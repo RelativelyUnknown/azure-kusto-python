@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import gzip
 import ipaddress
@@ -133,21 +134,23 @@ class BaseIngestClient(metaclass=ABCMeta):
         else:
             raise ValueError("Unsupported format: {}. Supported formats are: CSV, JSON, None".format(data_format))
 
+        properties = copy.copy(ingestion_properties)
         file_name = "df_{id}_{timestamp}_{uid}.{ext}.gz".format(id=id(df), timestamp=int(time.time()), uid=uuid.uuid4(), ext="json" if is_json else "csv")
         temp_file_path = os.path.join(tempfile.gettempdir(), file_name)
-        with gzip.open(temp_file_path, "wt", encoding="utf-8") as temp_file:
-            if is_json:
-                df.to_json(temp_file, orient="records", date_format="iso", lines=True)
-                ingestion_properties.format = DataFormat.JSON
-            else:
-                df.to_csv(temp_file, index=False, encoding="utf-8", header=False)
-                ingestion_properties.ignore_first_record = False
-                ingestion_properties.format = DataFormat.CSV
-
         try:
-            return self.ingest_from_file(temp_file_path, ingestion_properties)
+            with gzip.open(temp_file_path, "wt", encoding="utf-8") as temp_file:
+                if is_json:
+                    df.to_json(temp_file, orient="records", date_format="iso", lines=True)
+                    properties.format = DataFormat.JSON
+                else:
+                    df.to_csv(temp_file, index=False, encoding="utf-8", header=False)
+                    properties.ignore_first_record = False
+                    properties.format = DataFormat.CSV
+
+            return self.ingest_from_file(temp_file_path, properties)
         finally:
-            os.unlink(temp_file_path)
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temp_file_path)
 
     def ingest_from_arrow(
         self,
@@ -276,27 +279,38 @@ class BaseIngestClient(metaclass=ABCMeta):
 
     @staticmethod
     def get_ingestion_endpoint(cluster_url: str) -> str:
-        if INGEST_PREFIX in cluster_url or not cluster_url or BaseIngestClient.is_reserved_hostname(cluster_url):
+        if not cluster_url or BaseIngestClient._host_has_ingest_prefix(cluster_url) or BaseIngestClient.is_reserved_hostname(cluster_url):
             return cluster_url
         else:
             return cluster_url.replace(PROTOCOL_SUFFIX, PROTOCOL_SUFFIX + INGEST_PREFIX, 1)
 
     @staticmethod
     def get_query_endpoint(cluster_url: str) -> str:
-        if INGEST_PREFIX in cluster_url:
-            return cluster_url.replace(INGEST_PREFIX, "", 1)
+        if BaseIngestClient._host_has_ingest_prefix(cluster_url):
+            host_start = BaseIngestClient._host_start(cluster_url)
+            return cluster_url[:host_start] + cluster_url[host_start + len(INGEST_PREFIX) :]
         else:
             return cluster_url
+
+    @staticmethod
+    def _host_start(cluster_url: str) -> int:
+        scheme_end = cluster_url.find(PROTOCOL_SUFFIX)
+        return scheme_end + len(PROTOCOL_SUFFIX) if scheme_end >= 0 else 0
+
+    @staticmethod
+    def _host_has_ingest_prefix(cluster_url: str) -> bool:
+        return cluster_url[BaseIngestClient._host_start(cluster_url) :].lower().startswith(INGEST_PREFIX)
 
     @staticmethod
     def is_reserved_hostname(raw_uri: str) -> bool:
         url = urlparse(raw_uri)
         if not url.netloc:
             return True
-        authority = url.netloc.split(":")[0]  # removes port if exists
+        authority = (url.hostname or "").lower()  # without the port and the brackets of an IPv6 address
         try:
-            is_ip = ipaddress.ip_address(authority)
+            ipaddress.ip_address(authority)
+            is_ip = True
         except ValueError:
             is_ip = False
-        is_localhost = "localhost" in authority
-        return is_localhost or is_ip or authority.lower() == "onebox.dev.kusto.windows.net"
+        is_localhost = authority == "localhost" or authority.endswith(".localhost")
+        return is_localhost or is_ip or authority == "onebox.dev.kusto.windows.net"

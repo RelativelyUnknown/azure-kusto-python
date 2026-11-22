@@ -120,7 +120,7 @@ client.ingest_from_stream(io.StringIO("1,abc,15.3\n2,cde,99.9\n"), ingestion_pro
 
 ### Ingest a pandas DataFrame
 
-Install the package with the `pandas` extra, and use `ingest_from_dataframe`. The client converts the DataFrame to JSON, or to CSV if you pass `data_format=DataFormat.CSV` or a CSV mapping. It sets that format on the properties you pass in, so create separate properties for DataFrames:
+Install the package with the `pandas` extra, and use `ingest_from_dataframe`. The client converts the DataFrame to JSON, or to CSV if you pass `data_format=DataFormat.CSV` or a CSV mapping. The properties you pass in aren't modified:
 
 ```python
 import pandas

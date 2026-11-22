@@ -155,7 +155,7 @@ class ManagedStreamingIngestClient(BaseIngestClient):
                 return MonitoredActivity.invoke(
                     invoker,
                     name_of_span="ManagedStreamingIngestClient.ingest_from_stream_attempt",
-                    tracing_attributes={"attemptNumber": attempt, "sourceIsStream": from_stream},
+                    tracing_attributes={"attemptNumber": attempt.retry_state.attempt_number, "sourceIsStream": from_stream},
                 )
 
     @staticmethod
