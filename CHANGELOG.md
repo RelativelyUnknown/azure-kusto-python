@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The authentication section of the main README no longer describes ADAL, and its broken links are fixed.
 
 ### Fixed
+- `execute_streaming_query` now uses the "Initial Catalog" of the connection string when no database is given.
+- A redirect response raises `KustoServiceError("Unexpected redirection, got status code: ...")` instead of an unrelated error, and a streaming query that fails with a non-JSON body (for instance an HTML error page from a proxy) raises `KustoServiceError` instead of `JSONDecodeError`.
+- Request timeouts of a day or more are no longer cut down to their seconds part.
+- Connection strings accept a trailing `;`, and values may be quoted (`'...'` or `"..."`), which also allows a `;` inside a value.
+- `get_env` honours a falsy `default`, and the token provider tests can be collected again.
+- `QueuedIngestClient` raises `KustoQueueError` or `KustoBlobError` when the service returns no ingestion queues or storage containers, instead of returning `None` and failing later with an `AttributeError`.
+- `ingest_from_dataframe` no longer modifies the `IngestionProperties` you pass in, and removes its temporary file when writing the DataFrame fails.
+- `get_ingestion_endpoint` and `get_query_endpoint` look for the `ingest-` prefix at the start of the host name only (`bigingest-c.kusto.windows.net` is left alone), and `localhost` is recognized by the host name, so IPv6 addresses work and `mylocalhost-x...` is not reserved.
+- The managed streaming client traces the attempt number as a number, and the resource manager and the ingestion message no longer use the deprecated `datetime.utcnow()`.
 - The managed streaming ingestion sample used a constructor that doesn't exist. It uses `ManagedStreamingIngestClient(engine_kcsb, dm_kcsb)` now.
 
 ## [6.0.4] - 2026-05-06

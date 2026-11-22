@@ -8,7 +8,7 @@ def get_env(*args, optional=False, default=None):
     for arg in args:
         if arg in os.environ:
             return os.environ[arg]
-    if optional or default:
+    if optional or default is not None:
         return default
     raise ValueError("No environment variables found: {}".format(args))
 

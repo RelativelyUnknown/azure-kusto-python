@@ -63,7 +63,7 @@ class MockProvider(TokenProviderBase):
         return None
 
 
-KUSTO_URI = get_env("ENGINE_CONNECTION_STRING", None)
+KUSTO_URI = get_env("ENGINE_CONNECTION_STRING", optional=True)
 
 
 class TokenProviderTests(unittest.TestCase):
